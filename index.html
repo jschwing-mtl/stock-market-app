@@ -446,7 +446,7 @@
                     </div>`).join('');
                 resultsDiv.innerHTML = resultItems;
             } catch (error) {
-                resultsDiv.innerHTML = `<div class="text-red-500">Search failed. Please try again.</div>`;
+                resultsDiv.innerHTML = `<div class="text-red-500">Search failed: ${error.message}</div>`;
             }
         }
 

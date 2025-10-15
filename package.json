@@ -1,0 +1,12 @@
+{
+  "name": "stock-market-backend",
+  "version": "1.0.0",
+  "description": "Backend for the Stock Market Scholars app",
+  "main": "api.js",
+  "dependencies": {
+    "mongodb": "^4.1.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^8.5.1"
+  }
+}
+

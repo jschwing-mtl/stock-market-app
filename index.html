@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Market Scholars</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        .modal-bg {
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+        .chart-container {
+            position: relative;
+            height: 40vh;
+            width: 80vw;
+            max-width: 800px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div id="app" class="max-w-7xl mx-auto p-4">
+        <!-- App content will be rendered here by JavaScript -->
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        // This URL points to our new backend function on Netlify.
+        const API_ENDPOINT = '/.netlify/functions/api'; 
+        const FINNHUB_API_KEY = 'd3mh46pr01qmso33qirgd3mh46pr01qmso33qis0';
+
+        // --- API & DATA HANDLING ---
+        /**
+         * Central function for making API calls to the Netlify backend.
+         * CORS errors are impossible because the frontend and backend are on the same domain.
+         */
+        async function callApi(action, payload = {}) {
+            try {
+                const token = localStorage.getItem('sessionToken') || '';
+
+                const response = await fetch(API_ENDPOINT, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ action, payload, token })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+                }
+                const result = await response.json();
+                return result.data;
+            } catch (error) {
+                console.error('API Call Error:', action, error);
+                showMessage(`Error: ${error.message || 'Failed to fetch'}`);
+                throw error;
+            }
+        }
+
+
+        // --- APPLICATION STATE & ROUTING ---
+        const state = {
+            currentPage: 'login', // 'login', 'portfolio', 'trade', 'roster'
+            userData: null,
+            portfolio: { cash: 0, stocks: [] },
+            searchResults: [],
+            studentRoster: [],
+            currentChart: null,
+        };
+
+        function navigateTo(page) {
+            state.currentPage = page;
+            render();
+        }
+
+        // --- UI COMPONENTS & RENDERING ---
+        const App = () => {
+            const appContainer = document.getElementById('app');
+            appContainer.innerHTML = ''; // Clear previous content
+
+            switch (state.currentPage) {
+                case 'login':
+                    appContainer.innerHTML = LoginScreen();
+                    attachLoginListeners();
+                    break;
+                case 'portfolio':
+                    appContainer.innerHTML = Navbar() + PortfolioScreen();
+                    attachPortfolioListeners();
+                    break;
+                case 'trade':
+                    appContainer.innerHTML = Navbar() + TradeScreen();
+                    attachTradeListeners();
+                    break;
+                case 'roster':
+                     appContainer.innerHTML = Navbar() + RosterScreen();
+                     attachRosterListeners();
+                     break;
+            }
+        };
+
+        function Navbar() {
+            const isTeacher = state.userData && state.userData.role === 'teacher';
+            return `
+                <nav class="bg-white shadow-md rounded-lg p-4 mb-6 flex justify-between items-center">
+                    <div>
+                        <span class="text-xl font-bold text-indigo-600">Stock Market Scholars</span>
+                        <span class="ml-4 text-sm text-gray-500">Welcome, ${state.userData.username}!</span>
+                    </div>
+                    <div>
+                        <button onclick="navigateTo('portfolio')" class="px-4 py-2 text-sm font-medium rounded-md hover:bg-gray-100">Portfolio</button>
+                        <button onclick="navigateTo('trade')" class="px-4 py-2 text-sm font-medium rounded-md hover:bg-gray-100">Trade Stocks</button>
+                        ${isTeacher ? `<button onclick="navigateTo('roster')" class="px-4 py-2 text-sm font-medium rounded-md hover:bg-gray-100">Student Roster</button>` : ''}
+                        <button onclick="logout()" class="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-500 rounded-md hover:bg-red-600">Logout</button>
+                    </div>
+                </nav>
+            `;
+        }
+        
+        function LoginScreen() {
+            return `
+                <div class="min-h-screen flex items-center justify-center">
+                    <div class="bg-white p-8 rounded-lg shadow-lg w-full max-w-md">
+                        <h2 class="text-2xl font-bold mb-6 text-center text-gray-800">Welcome!</h2>
+                        
+                        <div class="flex border-b mb-6">
+                            <button id="login-tab" class="flex-1 py-2 text-center font-semibold text-indigo-600 border-b-2 border-indigo-600">Sign In</button>
+                            <button id="signup-tab" class="flex-1 py-2 text-center font-semibold text-gray-500">Sign Up</button>
+                        </div>
+
+                        <form id="login-form" class="space-y-4">
+                            <div>
+                                <label for="login-username" class="block text-sm font-medium text-gray-700">Username</label>
+                                <input type="text" id="login-username" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                            </div>
+                            <div>
+                                <label for="login-password" class="block text-sm font-medium text-gray-700">Password</label>
+                                <input type="password" id="login-password" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                            </div>
+                            <button type="submit" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Sign In</button>
+                        </form>
+                        
+                        <form id="signup-form" class="hidden space-y-4">
+                            <div>
+                                <label for="signup-username" class="block text-sm font-medium text-gray-700">Username</label>
+                                <input type="text" id="signup-username" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                            </div>
+                            <div>
+                                <label for="signup-password" class="block text-sm font-medium text-gray-700">Password</label>
+                                <input type="password" id="signup-password" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                            </div>
+                             <div class="flex items-center">
+                                <input id="is-teacher" type="checkbox" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
+                                <label for="is-teacher" class="ml-2 block text-sm text-gray-900">I am a teacher</label>
+                            </div>
+                            <button type="submit" class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">Sign Up</button>
+                        </form>
+                        
+                        <div id="message-area" class="mt-4 text-center text-red-500"></div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function PortfolioScreen() {
+             return `
+                <div id="portfolio-content" class="space-y-6">
+                    <div id="portfolio-loader" class="text-center">Loading portfolio...</div>
+                </div>
+                <div id="news-feed" class="mt-8"></div>
+                <div id="modal-container"></div>
+            `;
+        }
+
+        function TradeScreen() {
+            return `
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-2xl font-bold mb-4">Trade Stocks</h2>
+                    <div class="flex space-x-2">
+                        <input type="text" id="search-input" placeholder="Search by company name, product, or industry..." class="flex-grow px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                        <button id="search-button" class="bg-indigo-600 text-white px-6 py-2 rounded-md hover:bg-indigo-700">Search</button>
+                    </div>
+                    <div id="search-results" class="mt-6"></div>
+                </div>
+                <div id="modal-container"></div>
+            `;
+        }
+        
+        function RosterScreen() {
+            return `
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-2xl font-bold mb-4">Student Roster</h2>
+                    <div id="roster-list" class="space-y-2"></div>
+                </div>
+             `;
+        }
+
+        function showMessage(msg, isError = true) {
+            const messageArea = document.getElementById('message-area');
+            if (messageArea) {
+                messageArea.textContent = msg;
+                messageArea.className = isError ? 'mt-4 text-center text-red-500' : 'mt-4 text-center text-green-500';
+            }
+        }
+
+        function renderModal(content) {
+            const modalContainer = document.getElementById('modal-container');
+            if (modalContainer) {
+                modalContainer.innerHTML = `
+                    <div class="fixed inset-0 modal-bg flex items-center justify-center z-50">
+                        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-lg relative">
+                            <button onclick="closeModal()" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
+                            ${content}
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function closeModal() {
+            const modalContainer = document.getElementById('modal-container');
+            if (modalContainer) modalContainer.innerHTML = '';
+            if (state.currentChart) {
+                state.currentChart.destroy();
+                state.currentChart = null;
+            }
+        }
+
+        function attachLoginListeners() {
+            const loginForm = document.getElementById('login-form');
+            const signupForm = document.getElementById('signup-form');
+            const loginTab = document.getElementById('login-tab');
+            const signupTab = document.getElementById('signup-tab');
+
+            loginTab.addEventListener('click', () => {
+                loginForm.classList.remove('hidden');
+                signupForm.classList.add('hidden');
+                loginTab.classList.add('text-indigo-600', 'border-indigo-600');
+                signupTab.classList.remove('text-indigo-600', 'border-indigo-600');
+                signupTab.classList.add('text-gray-500');
+            });
+
+            signupTab.addEventListener('click', () => {
+                signupForm.classList.remove('hidden');
+                loginForm.classList.add('hidden');
+                signupTab.classList.add('text-indigo-600', 'border-indigo-600');
+                loginTab.classList.remove('text-indigo-600', 'border-indigo-600');
+                loginTab.classList.add('text-gray-500');
+            });
+
+            loginForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const username = document.getElementById('login-username').value;
+                const password = document.getElementById('login-password').value;
+                try {
+                    const data = await callApi('loginUser', { username, password });
+                    localStorage.setItem('sessionToken', data.token);
+                    state.userData = data.userData;
+                    navigateTo('portfolio');
+                } catch (error) {}
+            });
+
+            signupForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const username = document.getElementById('signup-username').value;
+                const password = document.getElementById('signup-password').value;
+                const isTeacher = document.getElementById('is-teacher').checked;
+                try {
+                    await callApi('registerUser', { username, password, isTeacher });
+                    showMessage("Account created successfully! Please sign in.", false);
+                    loginTab.click();
+                } catch (error) {}
+            });
+        }
+        
+        async function attachPortfolioListeners() {
+            const contentDiv = document.getElementById('portfolio-content');
+            try {
+                const portfolioData = await callApi('getPortfolio');
+                state.portfolio.cash = portfolioData.cash;
+                state.portfolio.stocks = portfolioData.stocks || [];
+                
+                const symbols = state.portfolio.stocks.map(s => s.symbol);
+                if (symbols.length > 0) {
+                    const quotePromises = symbols.map(symbol => 
+                        fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`).then(res => res.json())
+                    );
+                    const quotes = await Promise.all(quotePromises);
+                    state.portfolio.stocks.forEach((stock, index) => {
+                        stock.currentPrice = quotes[index].c;
+                    });
+                }
+                
+                renderPortfolioView();
+                renderNewsFeed(symbols);
+            } catch (error) {
+                contentDiv.innerHTML = `<div class="text-red-500">Could not load portfolio data. Please try again later.</div>`;
+            }
+        }
+        
+        function renderPortfolioView() {
+            const contentDiv = document.getElementById('portfolio-content');
+            let totalValue = state.portfolio.cash;
+            state.portfolio.stocks.forEach(s => totalValue += (s.shares * (s.currentPrice || s.purchasePrice)));
+            
+            const stockRows = state.portfolio.stocks.map(stock => {
+                const currentPrice = stock.currentPrice || stock.purchasePrice;
+                const currentValue = stock.shares * currentPrice;
+                const purchaseValue = stock.shares * stock.purchasePrice;
+                const gainLoss = currentValue - purchaseValue;
+                const gainLossPercent = purchaseValue ? (gainLoss / purchaseValue) * 100 : 0;
+                const gainLossColor = gainLoss >= 0 ? 'text-green-600' : 'text-red-600';
+
+                return `
+                    <tr class="border-b">
+                        <td class="py-3 px-4 font-medium">${stock.symbol}</td>
+                        <td class="py-3 px-4">${stock.shares}</td>
+                        <td class="py-3 px-4">$${stock.purchasePrice.toFixed(2)}</td>
+                        <td class="py-3 px-4">$${currentPrice.toFixed(2)}</td>
+                        <td class="py-3 px-4">$${currentValue.toFixed(2)}</td>
+                        <td class="py-3 px-4 ${gainLossColor}">$${gainLoss.toFixed(2)} (${gainLossPercent.toFixed(2)}%)</td>
+                        <td class="py-3 px-4"><button class="text-indigo-600 hover:underline" onclick="showChart('${stock.symbol}', ${stock.purchaseDate})">View Chart</button></td>
+                    </tr>
+                `;
+            }).join('');
+            
+            contentDiv.innerHTML = `
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                     <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-2xl font-bold">My Portfolio</h2>
+                        <button id="ai-analysis-btn" class="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 text-sm">✨ Get AI Portfolio Analysis</button>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center mb-6">
+                        <div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Total Value</h3><p class="text-2xl font-semibold">$${totalValue.toFixed(2)}</p></div>
+                        <div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Cash Balance</h3><p class="text-2xl font-semibold">$${state.portfolio.cash.toFixed(2)}</p></div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left">
+                            <thead class="bg-gray-50"><tr><th class="py-3 px-4 font-semibold">Symbol</th><th class="py-3 px-4 font-semibold">Shares</th><th class="py-3 px-4 font-semibold">Avg. Purchase Price</th><th class="py-3 px-4 font-semibold">Current Price</th><th class="py-3 px-4 font-semibold">Total Value</th><th class="py-3 px-4 font-semibold">Gain/Loss</th><th class="py-3 px-4 font-semibold">Actions</th></tr></thead>
+                            <tbody>${stockRows}</tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+            document.getElementById('ai-analysis-btn').addEventListener('click', getPortfolioAnalysis);
+        }
+
+        async function renderNewsFeed(symbols) {
+            const newsFeedDiv = document.getElementById('news-feed');
+            if (!symbols || symbols.length === 0) {
+                newsFeedDiv.innerHTML = ''; return;
+            }
+            newsFeedDiv.innerHTML = `<h2 class="text-2xl font-bold mb-4">Related News</h2><div id="news-loader">Loading news...</div>`;
+            try {
+                const from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                const to = new Date().toISOString().split('T')[0];
+                const newsPromises = symbols.map(symbol => fetch(`https://finnhub.io/api/v1/company-news?symbol=${symbol}&from=${from}&to=${to}&token=${FINNHUB_API_KEY}`).then(res => res.json()));
+                const allNewsArrays = await Promise.all(newsPromises);
+                const allNews = [].concat(...allNewsArrays).slice(0, 10);
+                const uniqueNews = Array.from(new Map(allNews.map(item => [item['headline'], item])).values());
+                const newsItems = await Promise.all(uniqueNews.map(async (news) => {
+                     const cached = await callApi('getCachedNews', { headline: news.headline });
+                     const simplifiedText = cached ? cached.simplifiedText : "Click to simplify...";
+                     return `<div class="bg-white p-4 rounded-lg shadow-sm mb-3"><h3 class="font-semibold">${news.headline}</h3><p class="text-xs text-gray-500">${new Date(news.datetime * 1000).toLocaleDateString()}</p><p class="text-sm mt-1">${news.summary}</p><a href="${news.url}" target="_blank" class="text-xs text-indigo-600 hover:underline">Read More</a><div class="mt-2 p-3 bg-indigo-50 rounded-lg"><p class="text-sm font-medium text-indigo-800">For Kids:</p><p class="text-sm text-indigo-700" id="simplified-${news.id}">${simplifiedText}</p>${!cached ? `<button class="text-xs text-purple-600 hover:underline mt-1" onclick="simplifyNews('${news.id}', \`${news.headline}\`, \`${news.summary}\`)">✨ Simplify with AI</button>` : ''}</div></div>`;
+                }));
+                document.getElementById('news-loader').remove();
+                newsFeedDiv.innerHTML += newsItems.join('');
+            } catch (error) {
+                document.getElementById('news-loader').textContent = 'Could not load news.';
+            }
+        }
+
+        async function simplifyNews(id, headline, summary) {
+             const targetP = document.getElementById(`simplified-${id}`);
+             targetP.textContent = "Simplifying...";
+             try {
+                const data = await callApi('simplifyNews', { headline, summary });
+                await callApi('setCachedNews', { headline, simplifiedText: data.simplifiedText });
+                targetP.textContent = data.simplifiedText;
+                targetP.nextElementSibling.remove();
+             } catch(error) {
+                targetP.textContent = "Could not simplify at this time.";
+             }
+        }
+        
+        function attachTradeListeners() {
+            document.getElementById('search-button').addEventListener('click', performSearch);
+            document.getElementById('search-input').addEventListener('keyup', (e) => {
+                if (e.key === 'Enter') performSearch();
+            });
+        }
+        
+        async function performSearch() {
+            const query = document.getElementById('search-input').value;
+            const resultsDiv = document.getElementById('search-results');
+            if (!query) return;
+            resultsDiv.innerHTML = `<div>Searching...</div>`;
+            try {
+                const res = await fetch(`https://finnhub.io/api/v1/search?q=${query}&token=${FINNHUB_API_KEY}`);
+                const data = await res.json();
+                state.searchResults = data.result.filter(r => r.type === 'Common Stock' && r.symbol.match(/^[A-Z]+$/));
+                if (state.searchResults.length === 0) {
+                    resultsDiv.innerHTML = `<div>No results found.</div>`; return;
+                }
+                const resultItems = state.searchResults.map(result => `<div class="flex justify-between items-center p-3 border-b hover:bg-gray-50"><div><p class="font-bold">${result.symbol}</p><p class="text-sm text-gray-600">${result.description}</p></div><div><button class="bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded-md hover:bg-purple-200" onclick="getCompanyExplanation('${result.description}', '${result.symbol}')">✨ Explain</button><button class="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600 ml-2" onclick="openTradeModal('${result.symbol}')">Trade</button></div></div>`).join('');
+                resultsDiv.innerHTML = resultItems;
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="text-red-500">Search failed. Please try again.</div>`;
+            }
+        }
+
+        async function openTradeModal(symbol) {
+            try {
+                const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`);
+                const quote = await res.json();
+                const price = quote.c;
+                const ownedStock = state.portfolio.stocks.find(s => s.symbol === symbol);
+                const sharesOwned = ownedStock ? ownedStock.shares : 0;
+                
+                const modalContent = `<h3 class="text-xl font-bold mb-4">Trade ${symbol}</h3><p class="mb-4">Current Price: <span class="font-semibold">$${price.toFixed(2)}</span></p><p class="mb-4">Cash available: <span class="font-semibold">$${state.portfolio.cash.toFixed(2)}</span></p><p class="mb-4">Shares owned: <span class="font-semibold">${sharesOwned}</span></p><div class="flex border-b mb-4"><button id="buy-tab" class="flex-1 py-2 text-center font-semibold text-indigo-600 border-b-2 border-indigo-600">Buy</button><button id="sell-tab" class="flex-1 py-2 text-center font-semibold text-gray-500">Sell</button></div><form id="buy-form" class="space-y-4"><label for="buy-quantity" class="block text-sm">Quantity</label><input type="number" id="buy-quantity" min="1" required class="w-full px-3 py-2 border rounded-md"><p class="text-sm">Total Cost: <span id="buy-total">$0.00</span></p><button type="submit" class="w-full bg-green-600 text-white py-2 rounded-md hover:bg-green-700">Buy ${symbol}</button></form><form id="sell-form" class="hidden space-y-4"><label for="sell-quantity" class="block text-sm">Quantity</label><input type="number" id="sell-quantity" min="1" max="${sharesOwned}" required class="w-full px-3 py-2 border rounded-md"><p class="text-sm">Total Credit: <span id="sell-total">$0.00</span></p><button type="submit" class="w-full bg-red-600 text-white py-2 rounded-md hover:bg-red-700">Sell ${symbol}</button></form><div id="trade-message" class="mt-4 text-center"></div>`;
+                renderModal(modalContent);
+                attachTradeModalListeners(symbol, price, sharesOwned);
+            } catch (error) {
+                renderModal(`<p class="text-red-500">Could not fetch stock data.</p>`);
+            }
+        }
+        
+        function attachTradeModalListeners(symbol, price, sharesOwned) {
+            const buyForm = document.getElementById('buy-form'), sellForm = document.getElementById('sell-form');
+            const buyTab = document.getElementById('buy-tab'), sellTab = document.getElementById('sell-tab');
+            const buyQuantityInput = document.getElementById('buy-quantity'), sellQuantityInput = document.getElementById('sell-quantity');
+            const buyTotalSpan = document.getElementById('buy-total'), sellTotalSpan = document.getElementById('sell-total');
+
+            buyTab.addEventListener('click', () => { buyForm.classList.remove('hidden'); sellForm.classList.add('hidden'); buyTab.classList.add('text-indigo-600', 'border-indigo-600'); sellTab.classList.remove('text-indigo-600', 'border-indigo-600'); });
+            sellTab.addEventListener('click', () => { sellForm.classList.remove('hidden'); buyForm.classList.add('hidden'); sellTab.classList.add('text-indigo-600', 'border-indigo-600'); buyTab.classList.remove('text-indigo-600', 'border-indigo-600'); });
+            
+            buyQuantityInput.addEventListener('input', (e) => { buyTotalSpan.textContent = `$${((parseInt(e.target.value) || 0) * price).toFixed(2)}`; });
+            sellQuantityInput.addEventListener('input', (e) => { sellTotalSpan.textContent = `$${((parseInt(e.target.value) || 0) * price).toFixed(2)}`; });
+            buyForm.addEventListener('submit', (e) => { e.preventDefault(); executeTrade('buy', symbol, parseInt(buyQuantityInput.value), price); });
+            sellForm.addEventListener('submit', (e) => { e.preventDefault(); executeTrade('sell', symbol, parseInt(sellQuantityInput.value), price); });
+        }
+        
+        async function executeTrade(type, symbol, quantity, price) {
+            const messageDiv = document.getElementById('trade-message');
+            messageDiv.textContent = 'Processing...';
+            try {
+                await callApi('executeTrade', { type, symbol, quantity, price });
+                messageDiv.textContent = `Successfully ${type === 'buy' ? 'bought' : 'sold'} ${quantity} shares of ${symbol}!`;
+                messageDiv.className = 'mt-4 text-center text-green-600';
+                const portfolioData = await callApi('getPortfolio');
+                state.portfolio.cash = portfolioData.cash;
+                state.portfolio.stocks = portfolioData.stocks;
+            } catch (error) {
+                messageDiv.textContent = `Error: ${error.message}`;
+                messageDiv.className = 'mt-4 text-center text-red-600';
+            }
+        }
+        
+        async function attachRosterListeners() {
+            const rosterDiv = document.getElementById('roster-list');
+            rosterDiv.innerHTML = `<div>Loading roster...</div>`;
+            try {
+                const roster = await callApi('getStudentRoster');
+                state.studentRoster = roster;
+                if(roster.length === 0) { rosterDiv.innerHTML = `<div>No students found.</div>`; return; }
+                const rosterItems = roster.map(student => `<div class="flex justify-between items-center p-3 border-b"><p>${student.username}</p><button class="text-sm text-indigo-600 hover:underline">View Portfolio</button></div>`).join('');
+                rosterDiv.innerHTML = rosterItems;
+            } catch (error) {
+                rosterDiv.innerHTML = `<div class="text-red-500">Could not load roster.</div>`;
+            }
+        }
+        
+        async function showChart(symbol, purchaseTimestamp) {
+            const to = Math.floor(Date.now() / 1000);
+            const from = purchaseTimestamp;
+            renderModal(`<div class="chart-container"><canvas id="stockChart"></canvas></div><div class="text-center mt-2" id="chart-loader">Loading chart data...</div>`);
+            try {
+                const res = await fetch(`https://finnhub.io/api/v1/stock/candle?symbol=${symbol}&resolution=D&from=${from}&to=${to}&token=${FINNHUB_API_KEY}`);
+                const data = await res.json();
+                if (data.s !== 'ok' || !data.c) throw new Error("No data available for this period.");
+                const chartLabels = data.t.map(ts => new Date(ts * 1000).toLocaleDateString());
+                const ctx = document.getElementById('stockChart').getContext('2d');
+                if (state.currentChart) state.currentChart.destroy();
+                state.currentChart = new Chart(ctx, { type: 'line', data: { labels: chartLabels, datasets: [{ label: `${symbol} Price`, data: data.c, borderColor: 'rgb(79, 70, 229)', tension: 0.1 }] } });
+                document.getElementById('chart-loader').remove();
+            } catch (error) {
+                 document.getElementById('chart-loader').textContent = `Could not load chart: ${error.message}`;
+            }
+        }
+
+        async function getCompanyExplanation(companyName, symbol) {
+            renderModal(`<h3 class="text-xl font-bold mb-2">${companyName} (${symbol})</h3><p id="explanation-text">Loading explanation...</p>`);
+            try {
+                const data = await callApi('getCompanyExplanation', { companyName, symbol });
+                document.getElementById('explanation-text').textContent = data.explanation;
+            } catch (error) {
+                document.getElementById('explanation-text').textContent = 'Could not get explanation at this time.';
+            }
+        }
+        
+        async function getPortfolioAnalysis() {
+            const holdings = state.portfolio.stocks.map(s => ({ symbol: s.symbol, value: s.shares * (s.currentPrice || s.purchasePrice) }));
+            renderModal(`<h3 class="text-xl font-bold mb-2">AI Portfolio Analysis</h3><p id="analysis-text">Thinking...</p>`);
+            try {
+                 const data = await callApi('getPortfolioAnalysis', { portfolioSummary: { cash: state.portfolio.cash, holdings } });
+                 document.getElementById('analysis-text').textContent = data.analysis;
+            } catch(error) {
+                 document.getElementById('analysis-text').textContent = 'Could not get analysis at this time.';
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('sessionToken');
+            state.userData = null;
+            navigateTo('login');
+        }
+
+        async function init() {
+            const token = localStorage.getItem('sessionToken');
+            if (token) {
+                try {
+                    const data = await callApi('validateSession');
+                    state.userData = data.userData;
+                    navigateTo('portfolio');
+                } catch (error) {
+                    logout();
+                }
+            } else {
+                navigateTo('login');
+            }
+        }
+
+        window.navigateTo = navigateTo;
+        window.logout = logout;
+        window.openTradeModal = openTradeModal;
+        window.closeModal = closeModal;
+        window.showChart = showChart;
+        window.simplifyNews = simplifyNews;
+        window.getCompanyExplanation = getCompanyExplanation;
+        
+        init();
+        
+        function render() {
+             App();
+        }
+    </script>
+</body>
+</html>
+

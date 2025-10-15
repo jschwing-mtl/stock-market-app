@@ -126,7 +126,8 @@ exports.handler = async (event) => {
 
 async function registerUser(collection, { username, password, isTeacher }) {
     if (!username || !password) throw new Error('Username and password are required.');
-    const existingUser = await collection.findOne({ username });
+    // Case-insensitive check for existing user
+    const existingUser = await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } });
     if (existingUser) throw new Error('Username already exists.');
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -146,7 +147,8 @@ async function registerUser(collection, { username, password, isTeacher }) {
 
 async function loginUser(collection, { username, password }) {
     if (!username || !password) throw new Error('Username and password are required.');
-    const user = await collection.findOne({ username });
+    // Case-insensitive search for user
+    const user = await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } });
     if (!user) throw new Error('Invalid credentials.');
 
     const isMatch = await bcrypt.compare(password, user.hashedPassword);
@@ -164,7 +166,7 @@ async function loginUser(collection, { username, password }) {
 // --- TEACHER & ROSTER FUNCTIONS ---
 
 async function addStudent(collection, { username, password, startingCash, teacherId }) {
-    const existingUser = await collection.findOne({ username });
+    const existingUser = await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } });
     if (existingUser) throw new Error('Username already exists.');
     
     const hashedPassword = await bcrypt.hash(password, 10);

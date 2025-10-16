@@ -11,8 +11,7 @@ async function connectToDatabase() {
     if (!uri) throw new Error('MONGODB_URI is not defined.');
     const client = new MongoClient(uri);
     await client.connect();
-    // ** THE FIX IS HERE: We now explicitly select the correct database **
-    const db = client.db('stock-market-app'); 
+    const db = client.db('stock-market-app');
     cachedDb = db;
     return db;
 }
@@ -67,12 +66,34 @@ export default async function handler(req, res) {
 }
 
 // --- AUTH & USER ---
-async function registerUser(collection, { username, password, isTeacher }) {
+async function registerUser(collection, { username, password }) {
+    // This function is now ONLY for teachers.
+    const TEACHER_REGISTRATION_PASSWORD = "mtlgap2025";
+    
     if (!username || !password) throw new Error('Username and password are required.');
-    if (await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } })) throw new Error('Username already exists.');
+    
+    // Check if the provided password is the special registration password.
+    if (password !== TEACHER_REGISTRATION_PASSWORD) {
+        throw new Error('Invalid registration password.');
+    }
+    
+    if (await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } })) {
+        throw new Error('Username already exists.');
+    }
+
+    // The teacher's actual login password will also be the registration password.
     const hashedPassword = await bcrypt.hash(password, 10);
-    const role = isTeacher ? 'teacher' : 'student';
-    await collection.insertOne({ username, hashedPassword, role, cash: role === 'student' ? 100000 : 0, stocks: [], teacherId: null });
+    const role = 'teacher';
+
+    await collection.insertOne({ 
+        username, 
+        hashedPassword, 
+        role, 
+        cash: 0, // Teachers do not have a portfolio
+        stocks: [], 
+        teacherId: null 
+    });
+    
     return { success: true };
 }
 
@@ -87,7 +108,14 @@ async function loginUser(collection, { username, password }) {
 async function addStudent(collection, { username, password, startingCash, teacherId }) {
     if (await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } })) throw new Error('Username already exists.');
     const hashedPassword = await bcrypt.hash(password, 10);
-    const { insertedId } = await collection.insertOne({ username, hashedPassword, role: 'student', cash: startingCash || 100000, stocks: [], teacherId: new ObjectId(teacherId) });
+    const { insertedId } = await collection.insertOne({ 
+        username, 
+        hashedPassword, 
+        role: 'student', 
+        cash: startingCash || 100000, 
+        stocks: [], 
+        teacherId: new ObjectId(teacherId) // Associate student with the teacher who created them.
+    });
     return { _id: insertedId, username, cash: startingCash || 100000 };
 }
 

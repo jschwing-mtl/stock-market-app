@@ -11,7 +11,8 @@ async function connectToDatabase() {
     if (!uri) throw new Error('MONGODB_URI is not defined.');
     const client = new MongoClient(uri);
     await client.connect();
-    const db = client.db();
+    // ** THE FIX IS HERE: We now explicitly select the correct database **
+    const db = client.db('stock-market-app'); 
     cachedDb = db;
     return db;
 }
@@ -203,6 +204,7 @@ async function intelligentSearch(query) {
     const data = await fmpApiCall('search', { query: symbol, limit: 1, exchange: 'NASDAQ,NYSE' });
     return (data || []).map(r => ({ symbol: r.symbol, description: r.name }));
 }
+
 
 async function getCompanyExplanation(cacheCollection, companyName, symbol) {
     const cached = await cacheCollection.findOne({ symbol });

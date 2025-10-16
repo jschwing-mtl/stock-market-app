@@ -6,6 +6,7 @@
     <title>Stock Market Scholars</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <style>
         body { font-family: 'Inter', sans-serif; }
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -14,9 +15,13 @@
         }
         .chart-container {
             position: relative;
-            height: 40vh;
+            height: 50vh;
             width: 80vw;
             max-width: 800px;
+        }
+        .time-range-btn.active {
+            background-color: #4f46e5;
+            color: white;
         }
     </style>
 </head>
@@ -27,50 +32,31 @@
 
     <script>
         // --- CONFIGURATION ---
-        // The backend URL for Netlify Functions. This is a relative path.
         const API_ENDPOINT = '/.netlify/functions/api';
 
         // --- API & DATA HANDLING ---
-        /**
-         * Central function for making API calls to the Netlify backend.
-         */
         async function callApi(action, payload = {}) {
             try {
                 const token = localStorage.getItem('sessionToken') || '';
-
                 const response = await fetch(API_ENDPOINT, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        action,
-                        payload,
-                        token
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action, payload, token })
                 });
-
                 if (!response.ok) {
                     const errorBody = await response.text();
-                    // Try to parse the error, but fall back to text if it's not JSON
                     let errorMessage = errorBody;
                     try {
-                        const errorJson = JSON.parse(errorBody);
-                        errorMessage = errorJson.message || errorBody;
-                    } catch (e) {
-                        // Not a JSON error, use the raw text
-                    }
+                        errorMessage = JSON.parse(errorBody).message || errorBody;
+                    } catch (e) {}
                     throw new Error(`HTTP error! status: ${response.status} - ${errorMessage}`);
                 }
-                
                 const result = await response.json();
-                
                 if (result.data) {
                     return result.data;
                 } else {
                     throw new Error(result.message || 'An unknown error occurred.');
                 }
-
             } catch (error) {
                 console.error('API Call Error:', action, error);
                 showMessage(`Error: ${error.message}`);
@@ -78,15 +64,14 @@
             }
         }
 
-
         // --- APPLICATION STATE & ROUTING ---
         const state = {
-            currentPage: 'login', // 'login', 'portfolio', 'trade', 'roster'
+            currentPage: 'login',
             userData: null,
             portfolio: { cash: 0, stocks: [] },
             searchResults: [],
             studentRoster: [],
-            currentChart: null,
+            currentChart: { instance: null, data: null },
         };
 
         function navigateTo(page) {
@@ -97,8 +82,7 @@
         // --- UI COMPONENTS & RENDERING ---
         const App = () => {
             const appContainer = document.getElementById('app');
-            appContainer.innerHTML = ''; // Clear previous content
-
+            appContainer.innerHTML = '';
             switch (state.currentPage) {
                 case 'login':
                     appContainer.innerHTML = LoginScreen();
@@ -138,85 +122,19 @@
         }
         
         function LoginScreen() {
-            return `
-                <div class="min-h-screen flex items-center justify-center">
-                    <div class="bg-white p-8 rounded-lg shadow-lg w-full max-w-md">
-                        <h2 class="text-2xl font-bold mb-6 text-center text-gray-800">Welcome!</h2>
-                        
-                        <div class="flex border-b mb-6">
-                            <button id="login-tab" class="flex-1 py-2 text-center font-semibold text-indigo-600 border-b-2 border-indigo-600">Sign In</button>
-                            <button id="signup-tab" class="flex-1 py-2 text-center font-semibold text-gray-500">Sign Up</button>
-                        </div>
-
-                        <form id="login-form" class="space-y-4">
-                            <div>
-                                <label for="login-username" class="block text-sm font-medium text-gray-700">Username</label>
-                                <input type="text" id="login-username" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-                            </div>
-                            <div>
-                                <label for="login-password" class="block text-sm font-medium text-gray-700">Password</label>
-                                <input type="password" id="login-password" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-                            </div>
-                            <button type="submit" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Sign In</button>
-                        </form>
-                        
-                        <form id="signup-form" class="hidden space-y-4">
-                            <div>
-                                <label for="signup-username" class="block text-sm font-medium text-gray-700">Username</label>
-                                <input type="text" id="signup-username" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-                            </div>
-                            <div>
-                                <label for="signup-password" class="block text-sm font-medium text-gray-700">Password</label>
-                                <input type="password" id="signup-password" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-                            </div>
-                             <div class="flex items-center">
-                                <input id="is-teacher" type="checkbox" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded">
-                                <label for="is-teacher" class="ml-2 block text-sm text-gray-900">I am a teacher</label>
-                            </div>
-                            <button type="submit" class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">Sign Up</button>
-                        </form>
-                        
-                        <div id="message-area" class="mt-4 text-center text-red-500"></div>
-                    </div>
-                </div>
-            `;
+            return `<div class="min-h-screen flex items-center justify-center"><div class="bg-white p-8 rounded-lg shadow-lg w-full max-w-md"><h2 class="text-2xl font-bold mb-6 text-center text-gray-800">Welcome!</h2><div class="flex border-b mb-6"><button id="login-tab" class="flex-1 py-2 text-center font-semibold text-indigo-600 border-b-2 border-indigo-600">Sign In</button><button id="signup-tab" class="flex-1 py-2 text-center font-semibold text-gray-500">Sign Up</button></div><form id="login-form" class="space-y-4"><div><label for="login-username" class="block text-sm font-medium text-gray-700">Username</label><input type="text" id="login-username" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></div><div><label for="login-password" class="block text-sm font-medium text-gray-700">Password</label><input type="password" id="login-password" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></div><button type="submit" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Sign In</button></form><form id="signup-form" class="hidden space-y-4"><div><label for="signup-username" class="block text-sm font-medium text-gray-700">Username</label><input type="text" id="signup-username" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></div><div><label for="signup-password" class="block text-sm font-medium text-gray-700">Password</label><input type="password" id="signup-password" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></div><div class="flex items-center"><input id="is-teacher" type="checkbox" class="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"><label for="is-teacher" class="ml-2 block text-sm text-gray-900">I am a teacher</label></div><button type="submit" class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">Sign Up</button></form><div id="message-area" class="mt-4 text-center text-red-500"></div></div></div>`;
         }
 
         function PortfolioScreen() {
-             return `
-                <div id="portfolio-content" class="space-y-6">
-                    <div id="portfolio-loader" class="text-center">Loading portfolio...</div>
-                </div>
-                <div id="news-feed" class="mt-8"></div>
-                <div id="modal-container"></div>
-            `;
+             return `<div id="portfolio-content" class="space-y-6"><div id="portfolio-loader" class="text-center">Loading portfolio...</div></div><div id="news-feed" class="mt-8"></div><div id="modal-container"></div>`;
         }
 
         function TradeScreen() {
-            return `
-                <div class="bg-white p-6 rounded-lg shadow-md">
-                    <h2 class="text-2xl font-bold mb-4">Trade Stocks</h2>
-                    <div class="flex space-x-2">
-                        <input type="text" id="search-input" placeholder="Search for 'iPhone', 'electric cars', etc..." class="flex-grow px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-                        <button id="search-button" class="bg-indigo-600 text-white px-6 py-2 rounded-md hover:bg-indigo-700">Search</button>
-                    </div>
-                    <div id="search-results" class="mt-6"></div>
-                </div>
-                <div id="modal-container"></div>
-            `;
+            return `<div class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-2xl font-bold mb-4">Trade Stocks</h2><div class="flex space-x-2"><input type="text" id="search-input" placeholder="Search for 'iPhone', 'electric cars', etc..." class="flex-grow px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"><button id="search-button" class="bg-indigo-600 text-white px-6 py-2 rounded-md hover:bg-indigo-700">Search</button></div><div id="search-results" class="mt-6"></div></div><div id="modal-container"></div>`;
         }
         
         function RosterScreen() {
-            return `
-                <div class="bg-white p-6 rounded-lg shadow-md">
-                    <div class="flex justify-between items-center mb-4">
-                        <h2 class="text-2xl font-bold">Student Roster</h2>
-                        <button id="add-student-btn" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm">Add Student</button>
-                    </div>
-                    <div id="roster-list" class="space-y-2"></div>
-                </div>
-                <div id="modal-container"></div>
-             `;
+            return `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">Student Roster</h2><button id="add-student-btn" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm">Add Student</button></div><div id="roster-list" class="space-y-2"></div></div><div id="modal-container"></div>`;
         }
         
         function showMessage(msg, isError = true) {
@@ -230,95 +148,42 @@
         function renderModal(content) {
             const modalContainer = document.getElementById('modal-container');
             if (modalContainer) {
-                modalContainer.innerHTML = `
-                    <div class="fixed inset-0 modal-bg flex items-center justify-center z-50">
-                        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-lg relative">
-                            <button onclick="closeModal()" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
-                            ${content}
-                        </div>
-                    </div>
-                `;
+                modalContainer.innerHTML = `<div class="fixed inset-0 modal-bg flex items-center justify-center z-50"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl relative"><button onclick="closeModal()" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800 text-2xl">&times;</button>${content}</div></div>`;
             }
         }
 
         function closeModal() {
             const modalContainer = document.getElementById('modal-container');
-            if (modalContainer) {
-                modalContainer.innerHTML = '';
-            }
-             if (state.currentChart) {
-                state.currentChart.destroy();
-                state.currentChart = null;
+            if (modalContainer) modalContainer.innerHTML = '';
+            if (state.currentChart.instance) {
+                state.currentChart.instance.destroy();
+                state.currentChart = { instance: null, data: null };
             }
         }
 
+        // --- EVENT LISTENERS & LOGIC ---
         function attachLoginListeners() {
-            const loginForm = document.getElementById('login-form');
-            const signupForm = document.getElementById('signup-form');
-            const loginTab = document.getElementById('login-tab');
-            const signupTab = document.getElementById('signup-tab');
-
-            loginTab.addEventListener('click', () => {
-                loginForm.classList.remove('hidden');
-                signupForm.classList.add('hidden');
-                loginTab.classList.add('text-indigo-600', 'border-indigo-600');
-                signupTab.classList.remove('text-indigo-600', 'border-indigo-600');
-                 signupTab.classList.add('text-gray-500');
-
-            });
-
-            signupTab.addEventListener('click', () => {
-                signupForm.classList.remove('hidden');
-                loginForm.classList.add('hidden');
-                signupTab.classList.add('text-indigo-600', 'border-indigo-600');
-                loginTab.classList.remove('text-indigo-600', 'border-indigo-600');
-                loginTab.classList.add('text-gray-500');
-            });
-
-            loginForm.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const username = document.getElementById('login-username').value;
-                const password = document.getElementById('login-password').value;
-                try {
-                    const data = await callApi('loginUser', { username, password });
-                    localStorage.setItem('sessionToken', data.token);
-                    state.userData = data.userData;
-                    navigateTo('portfolio');
-                } catch (error) { /* showMessage is handled in callApi */ }
-            });
-
-            signupForm.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const username = document.getElementById('signup-username').value;
-                const password = document.getElementById('signup-password').value;
-                const isTeacher = document.getElementById('is-teacher').checked;
-                try {
-                    await callApi('registerUser', { username, password, isTeacher });
-                    showMessage("Account created successfully! Please sign in.", false);
-                    loginTab.click();
-                } catch (error) { /* showMessage is handled in callApi */ }
-            });
+            const loginForm = document.getElementById('login-form'), signupForm = document.getElementById('signup-form');
+            const loginTab = document.getElementById('login-tab'), signupTab = document.getElementById('signup-tab');
+            loginTab.addEventListener('click', () => { loginForm.classList.remove('hidden'); signupForm.classList.add('hidden'); loginTab.classList.add('text-indigo-600', 'border-indigo-600'); signupTab.classList.remove('text-indigo-600', 'border-indigo-600'); signupTab.classList.add('text-gray-500'); });
+            signupTab.addEventListener('click', () => { signupForm.classList.remove('hidden'); loginForm.classList.add('hidden'); signupTab.classList.add('text-indigo-600', 'border-indigo-600'); loginTab.classList.remove('text-indigo-600', 'border-indigo-600'); loginTab.classList.add('text-gray-500'); });
+            loginForm.addEventListener('submit', async e => { e.preventDefault(); try { const data = await callApi('loginUser', { username: e.target.elements['login-username'].value, password: e.target.elements['login-password'].value }); localStorage.setItem('sessionToken', data.token); state.userData = data.userData; navigateTo('portfolio'); } catch (error) {} });
+            signupForm.addEventListener('submit', async e => { e.preventDefault(); try { await callApi('registerUser', { username: e.target.elements['signup-username'].value, password: e.target.elements['signup-password'].value, isTeacher: e.target.elements['is-teacher'].checked }); showMessage("Account created successfully! Please sign in.", false); loginTab.click(); } catch (error) {} });
         }
         
         async function attachPortfolioListeners() {
             const contentDiv = document.getElementById('portfolio-content');
-            
             try {
                 const portfolioData = await callApi('getPortfolio');
                 state.portfolio.cash = portfolioData.cash;
                 state.portfolio.stocks = portfolioData.stocks || [];
-                
                 const symbols = state.portfolio.stocks.map(s => s.symbol);
                 if (symbols.length > 0) {
                     const quotes = await callApi('getQuotes', { symbols });
-                    state.portfolio.stocks.forEach(stock => {
-                        stock.currentPrice = quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice;
-                    });
+                    state.portfolio.stocks.forEach(stock => { stock.currentPrice = quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice; });
                 }
-                
                 renderPortfolioView();
                 renderNewsFeed(symbols);
-
             } catch (error) {
                 console.error("Failed to load portfolio:", error);
                 contentDiv.innerHTML = `<div class="text-red-500">Could not load portfolio data. Please try again later.</div>`;
@@ -329,82 +194,26 @@
             const contentDiv = document.getElementById('portfolio-content');
             let totalValue = state.portfolio.cash;
             state.portfolio.stocks.forEach(s => totalValue += s.shares * s.currentPrice);
-            
             const stockRows = state.portfolio.stocks.map(stock => {
-                const currentValue = stock.shares * stock.currentPrice;
-                const purchaseValue = stock.shares * stock.purchasePrice;
-                const gainLoss = currentValue - purchaseValue;
-                const gainLossPercent = purchaseValue !== 0 ? (gainLoss / purchaseValue) * 100 : 0;
+                const currentValue = stock.shares * stock.currentPrice, purchaseValue = stock.shares * stock.purchasePrice, gainLoss = currentValue - purchaseValue, gainLossPercent = purchaseValue !== 0 ? (gainLoss / purchaseValue) * 100 : 0;
                 const gainLossColor = gainLoss >= 0 ? 'text-green-600' : 'text-red-600';
-
-                return `
-                    <tr class="border-b">
-                        <td class="py-3 px-4 font-medium">${stock.symbol}</td>
-                        <td class="py-3 px-4">${stock.shares}</td>
-                        <td class="py-3 px-4">$${stock.purchasePrice.toFixed(2)}</td>
-                        <td class="py-3 px-4">$${stock.currentPrice.toFixed(2)}</td>
-                        <td class="py-3 px-4">$${currentValue.toFixed(2)}</td>
-                        <td class="py-3 px-4 ${gainLossColor}">$${gainLoss.toFixed(2)} (${gainLossPercent.toFixed(2)}%)</td>
-                        <td class="py-3 px-4"><button class="text-indigo-600 hover:underline" onclick="showChart('${stock.symbol}', ${stock.purchaseDate})">View Chart</button></td>
-                    </tr>
-                `;
+                return `<tr class="border-b"><td class="py-3 px-4 font-medium">${stock.symbol}</td><td class="py-3 px-4">${stock.shares}</td><td class="py-3 px-4">$${stock.purchasePrice.toFixed(2)}</td><td class="py-3 px-4">$${stock.currentPrice.toFixed(2)}</td><td class="py-3 px-4">$${currentValue.toFixed(2)}</td><td class="py-3 px-4 ${gainLossColor}">$${gainLoss.toFixed(2)} (${gainLossPercent.toFixed(2)}%)</td><td class="py-3 px-4"><button class="text-indigo-600 hover:underline" onclick="showChart('${stock.symbol}')">View Chart</button></td></tr>`;
             }).join('');
-            
-            contentDiv.innerHTML = `
-                <div class="bg-white p-6 rounded-lg shadow-md">
-                     <div class="flex justify-between items-center mb-4">
-                        <h2 class="text-2xl font-bold">My Portfolio</h2>
-                        <button id="ai-analysis-btn" class="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 text-sm">✨ Get AI Portfolio Analysis</button>
-                    </div>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center mb-6">
-                        <div class="bg-gray-100 p-4 rounded-lg">
-                            <h3 class="text-sm font-medium text-gray-500">Total Value</h3>
-                            <p class="text-2xl font-semibold">$${totalValue.toFixed(2)}</p>
-                        </div>
-                        <div class="bg-gray-100 p-4 rounded-lg">
-                            <h3 class="text-sm font-medium text-gray-500">Cash Balance</h3>
-                            <p class="text-2xl font-semibold">$${state.portfolio.cash.toFixed(2)}</p>
-                        </div>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm text-left">
-                            <thead class="bg-gray-50"><tr><th class="py-3 px-4 font-semibold">Symbol</th><th class="py-3 px-4 font-semibold">Shares</th><th class="py-3 px-4 font-semibold">Avg. Purchase Price</th><th class="py-3 px-4 font-semibold">Current Price</th><th class="py-3 px-4 font-semibold">Total Value</th><th class="py-3 px-4 font-semibold">Gain/Loss</th><th class="py-3 px-4 font-semibold">Actions</th></tr></thead>
-                            <tbody>${stockRows.length > 0 ? stockRows : `<tr><td colspan="7" class="text-center py-4">You don't own any stocks yet. Go to the Trade page to buy some!</td></tr>`}</tbody>
-                        </table>
-                    </div>
-                </div>
-            `;
+            contentDiv.innerHTML = `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">My Portfolio</h2><button id="ai-analysis-btn" class="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 text-sm">✨ Get AI Portfolio Analysis</button></div><div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center mb-6"><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Total Value</h3><p class="text-2xl font-semibold">$${totalValue.toFixed(2)}</p></div><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Cash Balance</h3><p class="text-2xl font-semibold">$${state.portfolio.cash.toFixed(2)}</p></div></div><div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead class="bg-gray-50"><tr><th class="py-3 px-4 font-semibold">Symbol</th><th class="py-3 px-4 font-semibold">Shares</th><th class="py-3 px-4 font-semibold">Avg. Purchase Price</th><th class="py-3 px-4 font-semibold">Current Price</th><th class="py-3 px-4 font-semibold">Total Value</th><th class="py-3 px-4 font-semibold">Gain/Loss</th><th class="py-3 px-4 font-semibold">Actions</th></tr></thead><tbody>${stockRows.length > 0 ? stockRows : `<tr><td colspan="7" class="text-center py-4">You don't own any stocks yet. Go to the Trade page to buy some!</td></tr>`}</tbody></table></div></div>`;
             document.getElementById('ai-analysis-btn').addEventListener('click', getPortfolioAnalysis);
         }
 
         async function renderNewsFeed(symbols) {
             const newsFeedDiv = document.getElementById('news-feed');
-            if (!symbols || symbols.length === 0) {
-                newsFeedDiv.innerHTML = ''; return;
-            }
+            if (!symbols || symbols.length === 0) { newsFeedDiv.innerHTML = ''; return; }
             newsFeedDiv.innerHTML = `<h2 class="text-2xl font-bold mb-4">Related News</h2><div id="news-loader">Loading news...</div>`;
             try {
                 const allNews = await callApi('getCompanyNews', { symbols });
                 const uniqueNews = Array.from(new Map(allNews.map(item => [item['headline'], item])).values());
-                const newsItems = await Promise.all(uniqueNews.map(async (news) => {
-                     const simplifiedText = news.simplifiedText || "Click to simplify...";
-                     return `<div class="bg-white p-4 rounded-lg shadow-sm mb-3">
-                            <h3 class="font-semibold">${news.headline}</h3>
-                            <p class="text-xs text-gray-500">${new Date(news.datetime * 1000).toLocaleDateString()}</p>
-                            <p class="text-sm mt-1">${news.summary}</p>
-                            <a href="${news.url}" target="_blank" class="text-xs text-indigo-600 hover:underline">Read More</a>
-                            <div class="mt-2 p-3 bg-indigo-50 rounded-lg">
-                                <p class="text-sm font-medium text-indigo-800">For Kids:</p>
-                                <p class="text-sm text-indigo-700" id="simplified-${news.id}">${simplifiedText}</p>
-                                ${!news.simplifiedText ? `<button class="text-xs text-purple-600 hover:underline mt-1" onclick="simplifyNews('${news.id}', \`${news.headline.replace(/`/g, "'")}\`, \`${news.summary.replace(/`/g, "'")}\`)">✨ Simplify with AI</button>` : ''}
-                            </div>
-                        </div>`;
-                }));
+                const newsItems = uniqueNews.map(news => `<div class="bg-white p-4 rounded-lg shadow-sm mb-3"><h3 class="font-semibold">${news.headline}</h3><p class="text-xs text-gray-500">${new Date(news.datetime * 1000).toLocaleDateString()}</p><p class="text-sm mt-1">${news.summary}</p><a href="${news.url}" target="_blank" class="text-xs text-indigo-600 hover:underline">Read More</a><div class="mt-2 p-3 bg-indigo-50 rounded-lg"><p class="text-sm font-medium text-indigo-800">For Kids:</p><p class="text-sm text-indigo-700" id="simplified-${news.id}">${news.simplifiedText || "Click to simplify..."}</p>${!news.simplifiedText ? `<button class="text-xs text-purple-600 hover:underline mt-1" onclick="simplifyNews('${news.id}', \`${news.headline.replace(/`/g, "'")}\`, \`${news.summary.replace(/`/g, "'")}\`)">✨ Simplify with AI</button>` : ''}</div></div>`).join('');
                 document.getElementById('news-loader').remove();
-                newsFeedDiv.innerHTML += newsItems.join('');
-            } catch (error) {
-                document.getElementById('news-loader').textContent = 'Could not load news.';
-            }
+                newsFeedDiv.innerHTML += newsItems;
+            } catch (error) { document.getElementById('news-loader').textContent = 'Could not load news.'; }
         }
 
         async function simplifyNews(id, headline, summary) {
@@ -415,16 +224,12 @@
                 await callApi('setCachedNews', { headline, simplifiedText });
                 targetP.textContent = simplifiedText;
                 targetP.nextElementSibling?.remove();
-             } catch(error) {
-                targetP.textContent = "Could not simplify at this time.";
-             }
+             } catch(error) { targetP.textContent = "Could not simplify at this time."; }
         }
         
         function attachTradeListeners() {
             document.getElementById('search-button').addEventListener('click', performSearch);
-            document.getElementById('search-input').addEventListener('keyup', (e) => {
-                if (e.key === 'Enter') performSearch();
-            });
+            document.getElementById('search-input').addEventListener('keyup', e => { if (e.key === 'Enter') performSearch(); });
         }
         
         async function performSearch() {
@@ -435,25 +240,10 @@
             try {
                 const results = await callApi('intelligentSearch', { query });
                 state.searchResults = results;
-                if (state.searchResults.length === 0) {
-                    resultsDiv.innerHTML = `<div>No results found. Try a different search term.</div>`;
-                    return;
-                }
-                const resultItems = state.searchResults.map(result => `
-                    <div class="flex justify-between items-center p-3 border-b hover:bg-gray-50">
-                        <div>
-                            <p class="font-bold">${result.symbol}</p>
-                            <p class="text-sm text-gray-600">${result.description}</p>
-                        </div>
-                        <div>
-                            <button class="bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded-md hover:bg-purple-200" onclick="getCompanyExplanation('${result.description.replace(/'/g, "\\'")}', '${result.symbol}')">✨ Explain</button>
-                            <button class="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600 ml-2" onclick="openTradeModal('${result.symbol}')">Trade</button>
-                        </div>
-                    </div>`).join('');
+                if (state.searchResults.length === 0) { resultsDiv.innerHTML = `<div>No results found. Try a different search term.</div>`; return; }
+                const resultItems = state.searchResults.map(result => `<div class="flex justify-between items-center p-3 border-b hover:bg-gray-50"><div><p class="font-bold">${result.symbol}</p><p class="text-sm text-gray-600">${result.description}</p></div><div><button class="bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded-md hover:bg-purple-200" onclick="getCompanyExplanation('${result.description.replace(/'/g, "\\'")}', '${result.symbol}')">✨ Explain</button><button class="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600 ml-2" onclick="openTradeModal('${result.symbol}')">Trade</button></div></div>`).join('');
                 resultsDiv.innerHTML = resultItems;
-            } catch (error) {
-                resultsDiv.innerHTML = `<div class="text-red-500">Search failed: ${error.message}</div>`;
-            }
+            } catch (error) { resultsDiv.innerHTML = `<div class="text-red-500">Search failed: ${error.message}</div>`; }
         }
 
         async function openTradeModal(symbol) {
@@ -462,45 +252,32 @@
                 const price = quote[symbol].c;
                 const ownedStock = state.portfolio.stocks.find(s => s.symbol === symbol);
                 const sharesOwned = ownedStock ? ownedStock.shares : 0;
-                
-                const modalContent = `<h3 class="text-xl font-bold mb-4">Trade ${symbol}</h3>
-                    <p class="mb-4">Current Price: <span class="font-semibold">$${price.toFixed(2)}</span></p>
-                    <p class="mb-4">Cash available: <span class="font-semibold">$${state.portfolio.cash.toFixed(2)}</span></p>
-                    <p class="mb-4">Shares owned: <span class="font-semibold">${sharesOwned}</span></p>
-                    <div class="flex border-b mb-4"><button id="buy-tab" class="flex-1 py-2 text-center font-semibold text-indigo-600 border-b-2 border-indigo-600">Buy</button><button id="sell-tab" class="flex-1 py-2 text-center font-semibold text-gray-500">Sell</button></div>
-                    <form id="buy-form" class="space-y-4"><label for="buy-quantity" class="block text-sm">Quantity</label><input type="number" id="buy-quantity" min="1" required class="w-full px-3 py-2 border rounded-md"><p class="text-sm">Total Cost: <span id="buy-total">$0.00</span></p><button type="submit" class="w-full bg-green-600 text-white py-2 rounded-md hover:bg-green-700">Buy ${symbol}</button></form>
-                    <form id="sell-form" class="hidden space-y-4"><label for="sell-quantity" class="block text-sm">Quantity</label><input type="number" id="sell-quantity" min="1" max="${sharesOwned}" required class="w-full px-3 py-2 border rounded-md"><p class="text-sm">Total Credit: <span id="sell-total">$0.00</span></p><button type="submit" class="w-full bg-red-600 text-white py-2 rounded-md hover:bg-red-700">Sell ${symbol}</button></form>
-                    <div id="trade-message" class="mt-4 text-center"></div>`;
-
+                const modalContent = `<h3 class="text-xl font-bold mb-4">Trade ${symbol}</h3><p class="mb-4">Current Price: <span class="font-semibold">$${price.toFixed(2)}</span></p><p class="mb-4">Cash available: <span class="font-semibold">$${state.portfolio.cash.toFixed(2)}</span></p><p class="mb-4">Shares owned: <span class="font-semibold">${sharesOwned}</span></p><div class="flex border-b mb-4"><button id="buy-tab" class="flex-1 py-2 text-center font-semibold text-indigo-600 border-b-2 border-indigo-600">Buy</button><button id="sell-tab" class="flex-1 py-2 text-center font-semibold text-gray-500">Sell</button></div><form id="buy-form" class="space-y-4"><label for="buy-quantity" class="block text-sm">Quantity</label><input type="number" id="buy-quantity" min="1" required class="w-full px-3 py-2 border rounded-md"><p class="text-sm">Total Cost: <span id="buy-total">$0.00</span></p><button type="submit" class="w-full bg-green-600 text-white py-2 rounded-md hover:bg-green-700">Buy ${symbol}</button></form><form id="sell-form" class="hidden space-y-4"><label for="sell-quantity" class="block text-sm">Quantity</label><input type="number" id="sell-quantity" min="1" max="${sharesOwned}" required class="w-full px-3 py-2 border rounded-md"><p class="text-sm">Total Credit: <span id="sell-total">$0.00</span></p><button type="submit" class="w-full bg-red-600 text-white py-2 rounded-md hover:bg-red-700">Sell ${symbol}</button></form><div id="trade-message" class="mt-4 text-center"></div>`;
                 renderModal(modalContent);
                 attachTradeModalListeners(symbol, price, sharesOwned);
-            } catch (error) {
-                renderModal(`<p class="text-red-500">Could not fetch stock data.</p>`);
-            }
+            } catch (error) { renderModal(`<p class="text-red-500">Could not fetch stock data.</p>`); }
         }
         
         function attachTradeModalListeners(symbol, price, sharesOwned) {
-            const buyForm = document.getElementById('buy-form'), sellForm = document.getElementById('sell-form');
-            const buyTab = document.getElementById('buy-tab'), sellTab = document.getElementById('sell-tab');
-            const buyQuantityInput = document.getElementById('buy-quantity'), sellQuantityInput = document.getElementById('sell-quantity');
-            const buyTotalSpan = document.getElementById('buy-total'), sellTotalSpan = document.getElementById('sell-total');
-
+            const buyForm = document.getElementById('buy-form'), sellForm = document.getElementById('sell-form'), buyTab = document.getElementById('buy-tab'), sellTab = document.getElementById('sell-tab'), buyQuantityInput = document.getElementById('buy-quantity'), sellQuantityInput = document.getElementById('sell-quantity'), buyTotalSpan = document.getElementById('buy-total'), sellTotalSpan = document.getElementById('sell-total');
             buyTab.addEventListener('click', () => { buyForm.classList.remove('hidden'); sellForm.classList.add('hidden'); buyTab.classList.add('text-indigo-600', 'border-indigo-600'); sellTab.classList.remove('text-indigo-600', 'border-indigo-600'); });
             sellTab.addEventListener('click', () => { sellForm.classList.remove('hidden'); buyForm.classList.add('hidden'); sellTab.classList.add('text-indigo-600', 'border-indigo-600'); buyTab.classList.remove('text-indigo-600', 'border-indigo-600'); });
-            buyQuantityInput.addEventListener('input', (e) => { buyTotalSpan.textContent = `$${((parseInt(e.target.value) || 0) * price).toFixed(2)}`; });
-            sellQuantityInput.addEventListener('input', (e) => { sellTotalSpan.textContent = `$${((parseInt(e.target.value) || 0) * price).toFixed(2)}`; });
-            buyForm.addEventListener('submit', (e) => { e.preventDefault(); executeTrade('buy', symbol, parseInt(buyQuantityInput.value), price); });
-            sellForm.addEventListener('submit', (e) => { e.preventDefault(); executeTrade('sell', symbol, parseInt(sellQuantityInput.value), price); });
+            buyQuantityInput.addEventListener('input', e => { buyTotalSpan.textContent = `$${((parseInt(e.target.value) || 0) * price).toFixed(2)}`; });
+            sellQuantityInput.addEventListener('input', e => { sellTotalSpan.textContent = `$${((parseInt(e.target.value) || 0) * price).toFixed(2)}`; });
+            buyForm.addEventListener('submit', e => { e.preventDefault(); executeTrade('buy', symbol, parseInt(buyQuantityInput.value), price); });
+            sellForm.addEventListener('submit', e => { e.preventDefault(); executeTrade('sell', symbol, parseInt(sellQuantityInput.value), price); });
         }
         
         async function executeTrade(type, symbol, quantity, price) {
             const messageDiv = document.getElementById('trade-message');
             messageDiv.textContent = 'Processing...';
             try {
-                await callApi('executeTrade', { type, symbol, quantity, price });
+                const { newPortfolio } = await callApi('executeTrade', { type, symbol, quantity, price });
+                state.portfolio = newPortfolio; // Update state directly from backend response
                 messageDiv.textContent = `Successfully ${type === 'buy' ? 'bought' : 'sold'} ${quantity} shares of ${symbol}!`;
                 messageDiv.className = 'mt-4 text-center text-green-600';
-                await attachPortfolioListeners(); // Refresh portfolio data on main page
+                // No need to call attachPortfolioListeners, state is updated.
+                // The view will re-render when the page is visited again.
             } catch (error) {
                 messageDiv.textContent = `Error: ${error.message}`;
                 messageDiv.className = 'mt-4 text-center text-red-600';
@@ -515,61 +292,28 @@
                 const roster = await callApi('getStudentRoster');
                 state.studentRoster = roster;
                 renderRoster();
-            } catch (error) {
-                rosterDiv.innerHTML = `<div class="text-red-500">Could not load roster.</div>`;
-            }
+            } catch (error) { rosterDiv.innerHTML = `<div class="text-red-500">Could not load roster.</div>`; }
         }
 
         function renderRoster() {
             const rosterDiv = document.getElementById('roster-list');
-            if(state.studentRoster.length === 0) {
-                rosterDiv.innerHTML = `<div class="p-3 text-center">You haven't added any students yet.</div>`;
-                return;
-            }
-            const rosterItems = state.studentRoster.map(student => `
-                <div class="grid grid-cols-4 items-center p-3 border-b">
-                    <span>${student.username}</span>
-                    <span>$${student.cash.toFixed(2)}</span>
-                    <div>
-                        <button class="text-sm text-green-600 hover:underline" onclick="openAdjustCashModal('${student._id}', '${student.username}', ${student.cash}, 'add')">Add Cash</button>
-                        <button class="text-sm text-red-600 hover:underline ml-2" onclick="openAdjustCashModal('${student._id}', '${student.username}', ${student.cash}, 'remove')">Remove Cash</button>
-                    </div>
-                    <div class="text-right">
-                         <button class="text-sm text-red-500 hover:underline" onclick="removeStudent('${student._id}', '${student.username}')">Remove Student</button>
-                    </div>
-                </div>`).join('');
+            if(state.studentRoster.length === 0) { rosterDiv.innerHTML = `<div class="p-3 text-center">You haven't added any students yet.</div>`; return; }
+            const rosterItems = state.studentRoster.map(student => `<div class="grid grid-cols-4 items-center p-3 border-b"><span>${student.username}</span><span>$${student.cash.toFixed(2)}</span><div><button class="text-sm text-green-600 hover:underline" onclick="openAdjustCashModal('${student._id}', '${student.username}', ${student.cash}, 'add')">Add Cash</button><button class="text-sm text-red-600 hover:underline ml-2" onclick="openAdjustCashModal('${student._id}', '${student.username}', ${student.cash}, 'remove')">Remove Cash</button></div><div class="text-right"><button class="text-sm text-red-500 hover:underline" onclick="removeStudent('${student._id}', '${student.username}')">Remove Student</button></div></div>`).join('');
             rosterDiv.innerHTML = `<div class="grid grid-cols-4 p-3 font-semibold bg-gray-50"><span>Username</span><span>Cash Balance</span><span>Adjust Cash</span><span class="text-right">Actions</span></div>` + rosterItems;
         }
 
         function openAddStudentModal() {
-            const modalContent = `<h3 class="text-xl font-bold mb-4">Add New Student</h3>
-                <form id="add-student-form" class="space-y-4">
-                    <div><label for="student-username">Username</label><input type="text" id="student-username" required class="mt-1 w-full border rounded-md px-3 py-2"></div>
-                    <div><label for="student-password">Password</label><input type="password" id="student-password" required class="mt-1 w-full border rounded-md px-3 py-2"></div>
-                    <div><label for="student-cash">Starting Cash</label><input type="number" id="student-cash" value="100000" required class="mt-1 w-full border rounded-md px-3 py-2"></div>
-                    <button type="submit" class="w-full bg-green-600 text-white py-2 rounded-md">Add Student</button>
-                </form><div id="modal-message" class="mt-4 text-center"></div>`;
+            const modalContent = `<h3 class="text-xl font-bold mb-4">Add New Student</h3><form id="add-student-form" class="space-y-4"><div><label for="student-username">Username</label><input type="text" id="student-username" required class="mt-1 w-full border rounded-md px-3 py-2"></div><div><label for="student-password">Password</label><input type="password" id="student-password" required class="mt-1 w-full border rounded-md px-3 py-2"></div><div><label for="student-cash">Starting Cash</label><input type="number" id="student-cash" value="100000" required class="mt-1 w-full border rounded-md px-3 py-2"></div><button type="submit" class="w-full bg-green-600 text-white py-2 rounded-md">Add Student</button></form><div id="modal-message" class="mt-4 text-center"></div>`;
             renderModal(modalContent);
             document.getElementById('add-student-form').addEventListener('submit', async e => {
                 e.preventDefault();
-                const username = document.getElementById('student-username').value;
-                const password = document.getElementById('student-password').value;
-                const startingCash = parseFloat(document.getElementById('student-cash').value);
-                const msgDiv = document.getElementById('modal-message');
+                const username = e.target.elements['student-username'].value, password = e.target.elements['student-password'].value, startingCash = parseFloat(e.target.elements['student-cash'].value), msgDiv = document.getElementById('modal-message');
                 try {
-                    await callApi('addStudent', { username, password, startingCash });
-                    msgDiv.className = 'mt-4 text-center text-green-600';
-                    msgDiv.textContent = 'Student added! Refreshing roster...';
-                    setTimeout(async () => {
-                        const roster = await callApi('getStudentRoster');
-                        state.studentRoster = roster;
-                        renderRoster();
-                        closeModal();
-                    }, 1500);
-                } catch (error) {
-                    msgDiv.className = 'mt-4 text-center text-red-600';
-                    msgDiv.textContent = `Error: ${error.message}`;
-                }
+                    const newStudent = await callApi('addStudent', { username, password, startingCash });
+                    state.studentRoster.push(newStudent);
+                    renderRoster();
+                    closeModal();
+                } catch (error) { msgDiv.className = 'mt-4 text-center text-red-600'; msgDiv.textContent = `Error: ${error.message}`; }
             });
         }
         
@@ -584,16 +328,11 @@
         }
         
         function openAdjustCashModal(studentId, username, currentCash, type) {
-            const modalContent = `<h3 class="text-xl font-bold mb-4">${type === 'add' ? 'Add' : 'Remove'} Cash for ${username}</h3>
-                <p class="text-sm mb-4">Current Balance: $${currentCash.toFixed(2)}</p>
-                <form id="adjust-cash-form" class="space-y-4">
-                    <div><label for="cash-amount">Amount</label><input type="number" id="cash-amount" min="0.01" step="0.01" required class="mt-1 w-full border rounded-md px-3 py-2"></div>
-                    <button type="submit" class="w-full bg-indigo-600 text-white py-2 rounded-md">${type === 'add' ? 'Add to Balance' : 'Remove from Balance'}</button>
-                </form><div id="modal-message" class="mt-4 text-center"></div>`;
+            const modalContent = `<h3 class="text-xl font-bold mb-4">${type === 'add' ? 'Add' : 'Remove'} Cash for ${username}</h3><p class="text-sm mb-4">Current Balance: $${currentCash.toFixed(2)}</p><form id="adjust-cash-form" class="space-y-4"><div><label for="cash-amount">Amount</label><input type="number" id="cash-amount" min="0.01" step="0.01" required class="mt-1 w-full border rounded-md px-3 py-2"></div><button type="submit" class="w-full bg-indigo-600 text-white py-2 rounded-md">${type === 'add' ? 'Add to Balance' : 'Remove from Balance'}</button></form><div id="modal-message" class="mt-4 text-center"></div>`;
             renderModal(modalContent);
             document.getElementById('adjust-cash-form').addEventListener('submit', async e => {
                 e.preventDefault();
-                let amount = parseFloat(document.getElementById('cash-amount').value);
+                let amount = parseFloat(e.target.elements['cash-amount'].value);
                 if (type === 'remove') amount = -amount;
                 const msgDiv = document.getElementById('modal-message');
                 try {
@@ -602,31 +341,87 @@
                     student.cash += amount;
                     renderRoster();
                     closeModal();
-                } catch (error) {
-                    msgDiv.className = 'mt-4 text-center text-red-600';
-                    msgDiv.textContent = `Error: ${error.message}`;
-                }
+                } catch (error) { msgDiv.className = 'mt-4 text-center text-red-600'; msgDiv.textContent = `Error: ${error.message}`; }
             });
         }
         
-        async function showChart(symbol, purchaseTimestamp) {
-            const to = Math.floor(Date.now() / 1000);
-            const from = purchaseTimestamp;
-            const modalContent = `<div class="chart-container"><canvas id="stockChart"></canvas></div><div class="text-center mt-2">Loading chart data...</div>`;
+        async function showChart(symbol) {
+            const modalContent = `<div class="text-center mb-4"><h3 class="text-xl font-bold">${symbol} Chart</h3></div><div class="chart-container"><canvas id="stockChart"></canvas></div><div class="flex justify-center space-x-2 mt-4" id="chart-time-ranges"></div><div id="chart-loader" class="text-center mt-2">Loading chart data...</div>`;
             renderModal(modalContent);
             try {
-                const data = await callApi('getChartData', { symbol, from, to });
-                if (data.s !== 'ok' || !data.c || data.c.length === 0) throw new Error("No data available for this period.");
-                const chartLabels = data.t.map(ts => new Date(ts * 1000).toLocaleDateString());
-                const chartData = data.c;
-                const ctx = document.getElementById('stockChart').getContext('2d');
-                if (state.currentChart) state.currentChart.destroy();
-                state.currentChart = new Chart(ctx, { type: 'line', data: { labels: chartLabels, datasets: [{ label: `${symbol} Price`, data: chartData, borderColor: 'rgb(79, 70, 229)', tension: 0.1 }] } });
-                document.querySelector('.text-center.mt-2').remove();
-            } catch (error) {
-                 document.querySelector('.text-center.mt-2').textContent = `Could not load chart: ${error.message}`;
-            }
+                const data = await callApi('getChartData', { symbol });
+                if (!data || !data.c || data.c.length === 0) throw new Error("No chart data available.");
+                state.currentChart.data = data;
+                document.getElementById('chart-loader').remove();
+                renderTimeRangeButtons();
+                updateChart('1Y'); // Default to 1 year
+            } catch (error) { document.getElementById('chart-loader').textContent = `Could not load chart: ${error.message}`; }
         }
+
+        function renderTimeRangeButtons() {
+            const container = document.getElementById('chart-time-ranges');
+            const ranges = ['1W', '1M', '3M', '6M', '1Y', '5Y', 'All'];
+            container.innerHTML = ranges.map(range => `<button class="time-range-btn px-3 py-1 text-sm rounded-md bg-gray-200 hover:bg-gray-300" onclick="updateChart('${range}')">${range}</button>`).join('');
+        }
+
+        function updateChart(range) {
+            document.querySelectorAll('.time-range-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelector(`.time-range-btn:last-child`).previousElementSibling.previousElementSibling.classList.add('active'); // default active
+            event.target.classList.add('active');
+
+            const { c, t } = state.currentChart.data;
+            const now = new Date();
+            let startDate = new Date();
+
+            switch (range) {
+                case '1W': startDate.setDate(now.getDate() - 7); break;
+                case '1M': startDate.setMonth(now.getMonth() - 1); break;
+                case '3M': startDate.setMonth(now.getMonth() - 3); break;
+                case '6M': startDate.setMonth(now.getMonth() - 6); break;
+                case '1Y': startDate.setFullYear(now.getFullYear() - 1); break;
+                case '5Y': startDate.setFullYear(now.getFullYear() - 5); break;
+                case 'All': startDate = new Date(t[0] * 1000); break;
+            }
+
+            const startIndex = t.findIndex(ts => (ts * 1000) >= startDate.getTime());
+            const filteredLabels = t.slice(startIndex).map(ts => new Date(ts * 1000));
+            const filteredData = c.slice(startIndex);
+
+            const ctx = document.getElementById('stockChart').getContext('2d');
+            if (state.currentChart.instance) state.currentChart.instance.destroy();
+
+            state.currentChart.instance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: filteredLabels,
+                    datasets: [{
+                        data: filteredData,
+                        borderColor: 'rgb(79, 70, 229)',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: { unit: 'month' },
+                            grid: { display: false },
+                            ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 7 }
+                        },
+                        y: {
+                            grid: { color: '#e5e7eb' },
+                            ticks: { callback: value => '$' + value }
+                        }
+                    }
+                }
+            });
+        }
+
 
         async function getCompanyExplanation(companyName, symbol) {
             const modalContent = `<h3 class="text-xl font-bold mb-2">${companyName} (${symbol})</h3><p id="explanation-text">Loading explanation...</p>`;
@@ -634,9 +429,7 @@
             try {
                 const { explanation } = await callApi('getCompanyExplanation', { companyName, symbol });
                 document.getElementById('explanation-text').textContent = explanation;
-            } catch (error) {
-                document.getElementById('explanation-text').textContent = 'Could not get explanation at this time.';
-            }
+            } catch (error) { document.getElementById('explanation-text').textContent = 'Could not get explanation at this time.'; }
         }
         
         async function getPortfolioAnalysis() {
@@ -646,9 +439,7 @@
             try {
                  const { analysis } = await callApi('getPortfolioAnalysis', { portfolioSummary });
                  document.getElementById('analysis-text').textContent = analysis;
-            } catch(error) {
-                 document.getElementById('analysis-text').textContent = 'Could not get analysis at this time.';
-            }
+            } catch(error) { document.getElementById('analysis-text').textContent = 'Could not get analysis at this time.'; }
         }
 
         function logout() {
@@ -664,25 +455,11 @@
                     const data = await callApi('validateSession');
                     state.userData = data;
                     navigateTo('portfolio');
-                } catch (error) {
-                    logout();
-                }
-            } else {
-                navigateTo('login');
-            }
+                } catch (error) { logout(); }
+            } else { navigateTo('login'); }
         }
 
-        window.navigateTo = navigateTo;
-        window.logout = logout;
-        window.openTradeModal = openTradeModal;
-        window.closeModal = closeModal;
-        window.showChart = showChart;
-        window.simplifyNews = simplifyNews;
-        window.getCompanyExplanation = getCompanyExplanation;
-        window.openAddStudentModal = openAddStudentModal;
-        window.openAdjustCashModal = openAdjustCashModal;
-        window.removeStudent = removeStudent;
-        
+        window.navigateTo = navigateTo; window.logout = logout; window.openTradeModal = openTradeModal; window.closeModal = closeModal; window.showChart = showChart; window.simplifyNews = simplifyNews; window.getCompanyExplanation = getCompanyExplanation; window.openAddStudentModal = openAddStudentModal; window.openAdjustCashModal = openAdjustCashModal; window.removeStudent = removeStudent; window.updateChart = updateChart;
         init();
         function render() { App(); }
     </script>

@@ -32,7 +32,7 @@
 
     <script>
         // --- CONFIGURATION ---
-        const API_ENDPOINT = '/.netlify/functions/api';
+        const API_ENDPOINT = '/api/api'; // Correct endpoint for Vercel
 
         // --- API & DATA HANDLING ---
         async function callApi(action, payload = {}) {
@@ -359,13 +359,12 @@
         function renderTimeRangeButtons() {
             const container = document.getElementById('chart-time-ranges');
             const ranges = ['1W', '1M', '3M', '6M', '1Y', '5Y', 'All'];
-            container.innerHTML = ranges.map(range => `<button class="time-range-btn px-3 py-1 text-sm rounded-md bg-gray-200 hover:bg-gray-300" onclick="updateChart('${range}')">${range}</button>`).join('');
+            container.innerHTML = ranges.map(range => `<button class="time-range-btn px-3 py-1 text-sm rounded-md bg-gray-200 hover:bg-gray-300" onclick="updateChart(this, '${range}')">${range}</button>`).join('');
         }
 
-        function updateChart(range) {
-            document.querySelectorAll('.time-range-btn').forEach(btn => btn.classList.remove('active'));
-            document.querySelector(`.time-range-btn:last-child`).previousElementSibling.previousElementSibling.classList.add('active'); // default active
-            event.target.classList.add('active');
+        function updateChart(btn, range) {
+            document.querySelectorAll('.time-range-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
 
             const { c, t } = state.currentChart.data;
             const now = new Date();

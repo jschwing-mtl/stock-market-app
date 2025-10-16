@@ -177,35 +177,47 @@
                 const portfolioData = await callApi('getPortfolio');
                 state.portfolio.cash = portfolioData.cash;
                 state.portfolio.stocks = portfolioData.stocks || [];
+                
                 const symbols = state.portfolio.stocks.map(s => s.symbol);
                 if (symbols.length > 0) {
                     const quotes = await callApi('getQuotes', { symbols });
                     state.portfolio.stocks.forEach(stock => { stock.currentPrice = quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice; });
                 }
-                renderPortfolioView();
                 renderNewsFeed(symbols);
+                renderPortfolioView(); // Call this after news
             } catch (error) {
                 console.error("Failed to load portfolio:", error);
-                contentDiv.innerHTML = `<div class="text-red-500">Could not load portfolio data. Please try again later.</div>`;
+                contentDiv.innerHTML = `<div class="text-red-500">Could not load data. Please try again later.</div>`;
             }
         }
         
         function renderPortfolioView() {
             const contentDiv = document.getElementById('portfolio-content');
+            const isTeacher = state.userData.role === 'teacher';
+            
             let totalValue = state.portfolio.cash;
             state.portfolio.stocks.forEach(s => totalValue += s.shares * s.currentPrice);
+            
+            const teacherCashControls = isTeacher ? `
+                <div class="mt-2 flex justify-center space-x-2">
+                    <button class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-md hover:bg-green-200" onclick="openAdjustTeacherCashModal('add')">Add Cash</button>
+                    <button class="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-md hover:bg-red-200" onclick="openAdjustTeacherCashModal('remove')">Remove Cash</button>
+                </div>
+            ` : '';
+            
             const stockRows = state.portfolio.stocks.map(stock => {
                 const currentValue = stock.shares * stock.currentPrice, purchaseValue = stock.shares * stock.purchasePrice, gainLoss = currentValue - purchaseValue, gainLossPercent = purchaseValue !== 0 ? (gainLoss / purchaseValue) * 100 : 0;
                 const gainLossColor = gainLoss >= 0 ? 'text-green-600' : 'text-red-600';
                 return `<tr class="border-b"><td class="py-3 px-4 font-medium">${stock.symbol}</td><td class="py-3 px-4">${stock.shares}</td><td class="py-3 px-4">$${stock.purchasePrice.toFixed(2)}</td><td class="py-3 px-4">$${stock.currentPrice.toFixed(2)}</td><td class="py-3 px-4">$${currentValue.toFixed(2)}</td><td class="py-3 px-4 ${gainLossColor}">$${gainLoss.toFixed(2)} (${gainLossPercent.toFixed(2)}%)</td><td class="py-3 px-4"><button class="text-indigo-600 hover:underline" onclick="showChart('${stock.symbol}')">View Chart</button></td></tr>`;
             }).join('');
-            contentDiv.innerHTML = `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">My Portfolio</h2><button id="ai-analysis-btn" class="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 text-sm">✨ Get AI Portfolio Analysis</button></div><div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center mb-6"><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Total Value</h3><p class="text-2xl font-semibold">$${totalValue.toFixed(2)}</p></div><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Cash Balance</h3><p class="text-2xl font-semibold">$${state.portfolio.cash.toFixed(2)}</p></div></div><div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead class="bg-gray-50"><tr><th class="py-3 px-4 font-semibold">Symbol</th><th class="py-3 px-4 font-semibold">Shares</th><th class="py-3 px-4 font-semibold">Avg. Purchase Price</th><th class="py-3 px-4 font-semibold">Current Price</th><th class="py-3 px-4 font-semibold">Total Value</th><th class="py-3 px-4 font-semibold">Gain/Loss</th><th class="py-3 px-4 font-semibold">Actions</th></tr></thead><tbody>${stockRows.length > 0 ? stockRows : `<tr><td colspan="7" class="text-center py-4">You don't own any stocks yet. Go to the Trade page to buy some!</td></tr>`}</tbody></table></div></div>`;
+
+            contentDiv.innerHTML = `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">My Portfolio</h2><button id="ai-analysis-btn" class="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 text-sm">✨ Get AI Portfolio Analysis</button></div><div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center mb-6"><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Total Value</h3><p class="text-2xl font-semibold">$${totalValue.toFixed(2)}</p></div><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Cash Balance</h3><p id="cash-balance-display" class="text-2xl font-semibold">$${state.portfolio.cash.toFixed(2)}</p>${teacherCashControls}</div></div><div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead class="bg-gray-50"><tr><th class="py-3 px-4 font-semibold">Symbol</th><th class="py-3 px-4 font-semibold">Shares</th><th class="py-3 px-4 font-semibold">Avg. Purchase Price</th><th class="py-3 px-4 font-semibold">Current Price</th><th class="py-3 px-4 font-semibold">Total Value</th><th class="py-3 px-4 font-semibold">Gain/Loss</th><th class="py-3 px-4 font-semibold">Actions</th></tr></thead><tbody>${stockRows.length > 0 ? stockRows : `<tr><td colspan="7" class="text-center py-4">You don't own any stocks yet. Go to the Trade page to buy some!</td></tr>`}</tbody></table></div></div>`;
             document.getElementById('ai-analysis-btn').addEventListener('click', getPortfolioAnalysis);
         }
 
         async function renderNewsFeed(symbols) {
             const newsFeedDiv = document.getElementById('news-feed');
-            if (!symbols || symbols.length === 0) { newsFeedDiv.innerHTML = ''; return; }
+            if (state.userData.role === 'teacher' || !symbols || symbols.length === 0) { newsFeedDiv.innerHTML = ''; return; }
             newsFeedDiv.innerHTML = `<h2 class="text-2xl font-bold mb-4">Related News</h2><div id="news-loader">Loading news...</div>`;
             try {
                 const allNews = await callApi('getCompanyNews', { symbols });
@@ -352,7 +364,7 @@
                 state.currentChart.data = data;
                 document.getElementById('chart-loader').remove();
                 renderTimeRangeButtons();
-                updateChart('1Y'); // Default to 1 year
+                updateChart(document.querySelector('#chart-time-ranges button:nth-child(5)'), '1Y'); // Default to 1 year
             } catch (error) { document.getElementById('chart-loader').textContent = `Could not load chart: ${error.message}`; }
         }
 
@@ -418,6 +430,30 @@
                 }
             });
         }
+        
+        function openAdjustTeacherCashModal(type) {
+            const modalContent = `<h3 class="text-xl font-bold mb-4">${type === 'add' ? 'Add' : 'Remove'} Cash</h3>
+                <form id="adjust-teacher-cash-form" class="space-y-4">
+                    <div><label for="cash-amount">Amount</label><input type="number" id="cash-amount" min="0.01" step="0.01" required class="mt-1 w-full border rounded-md px-3 py-2"></div>
+                    <button type="submit" class="w-full bg-indigo-600 text-white py-2 rounded-md">${type === 'add' ? 'Add to Balance' : 'Remove from Balance'}</button>
+                </form><div id="modal-message" class="mt-4 text-center"></div>`;
+            renderModal(modalContent);
+            document.getElementById('adjust-teacher-cash-form').addEventListener('submit', async e => {
+                e.preventDefault();
+                let amount = parseFloat(e.target.elements['cash-amount'].value);
+                if (type === 'remove') amount = -amount;
+                const msgDiv = document.getElementById('modal-message');
+                try {
+                    const { newCashBalance } = await callApi('updateTeacherCash', { amount });
+                    state.portfolio.cash = newCashBalance;
+                    document.getElementById('cash-balance-display').textContent = `$${newCashBalance.toFixed(2)}`;
+                    closeModal();
+                } catch (error) {
+                    msgDiv.className = 'mt-4 text-center text-red-600';
+                    msgDiv.textContent = `Error: ${error.message}`;
+                }
+            });
+        }
 
 
         async function getCompanyExplanation(companyName, symbol) {
@@ -456,7 +492,7 @@
             } else { navigateTo('login'); }
         }
 
-        window.navigateTo = navigateTo; window.logout = logout; window.openTradeModal = openTradeModal; window.closeModal = closeModal; window.showChart = showChart; window.simplifyNews = simplifyNews; window.getCompanyExplanation = getCompanyExplanation; window.openAddStudentModal = openAddStudentModal; window.openAdjustCashModal = openAdjustCashModal; window.removeStudent = removeStudent; window.updateChart = updateChart;
+        window.navigateTo = navigateTo; window.logout = logout; window.openTradeModal = openTradeModal; window.closeModal = closeModal; window.showChart = showChart; window.simplifyNews = simplifyNews; window.getCompanyExplanation = getCompanyExplanation; window.openAddStudentModal = openAddStudentModal; window.openAdjustCashModal = openAdjustCashModal; window.removeStudent = removeStudent; window.updateChart = updateChart; window.openAdjustTeacherCashModal = openAdjustTeacherCashModal;
         init();
         function render() { App(); }
     </script>

@@ -184,14 +184,25 @@ async function getChartData(symbol) {
     };
 }
 
+// --- AI-POWERED FUNCTIONS (OPENAI) ---
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
 async function intelligentSearch(query) {
-    const data = await fmpApiCall('search', { query, limit: 10, exchange: 'NASDAQ,NYSE' });
+    const completion = await openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [
+            { role: 'system', content: "You are an expert financial assistant. A 4th-grade student is searching for a stock. Based on their query, identify the most likely single stock ticker symbol they are looking for. The stock must be on a major US exchange. Your response MUST be only the ticker symbol and nothing else." },
+            { role: 'user', content: `Query: "${query}"` }
+        ],
+        temperature: 0,
+        max_tokens: 10,
+    });
+    const symbol = completion.choices[0].message.content.trim().toUpperCase().replace(/[^A-Z]/g, '');
+    if (!symbol) return [];
+    const data = await fmpApiCall('search', { query: symbol, limit: 1, exchange: 'NASDAQ,NYSE' });
     return (data || []).map(r => ({ symbol: r.symbol, description: r.name }));
 }
 
-
-// --- AI-POWERED FUNCTIONS (OPENAI) ---
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 async function getCompanyExplanation(cacheCollection, companyName, symbol) {
     const cached = await cacheCollection.findOne({ symbol });

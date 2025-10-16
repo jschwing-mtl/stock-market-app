@@ -27,7 +27,7 @@
 
     <script>
         // --- CONFIGURATION ---
-        // The backend URL for Netlify Functions.
+        // The backend URL for Netlify Functions. This is a relative path.
         const API_ENDPOINT = '/.netlify/functions/api';
 
         // --- API & DATA HANDLING ---
@@ -52,16 +52,22 @@
 
                 if (!response.ok) {
                     const errorBody = await response.text();
-                    throw new Error(`HTTP error! status: ${response.status} - ${errorBody}`);
+                    // Try to parse the error, but fall back to text if it's not JSON
+                    let errorMessage = errorBody;
+                    try {
+                        const errorJson = JSON.parse(errorBody);
+                        errorMessage = errorJson.message || errorBody;
+                    } catch (e) {
+                        // Not a JSON error, use the raw text
+                    }
+                    throw new Error(`HTTP error! status: ${response.status} - ${errorMessage}`);
                 }
                 
                 const result = await response.json();
                 
-                // The backend now sends back a top-level `data` or `message` property.
                 if (result.data) {
                     return result.data;
                 } else {
-                    // This handles cases where the backend sends an error message even with a 200 OK status.
                     throw new Error(result.message || 'An unknown error occurred.');
                 }
 

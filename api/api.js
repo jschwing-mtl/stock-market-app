@@ -27,7 +27,7 @@ export default async function handler(req, res) {
         const { action, payload, token } = req.body;
         let userData;
 
-        const protectedActions = ['getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 'updateStudentCash', 'updateTeacherCash', 'getQuotes', 'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession'];
+        const protectedActions = ['getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 'updateStudentCash', 'updateTeacherCash', 'getQuotes', 'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 'getLeaderboards'];
         
         if (protectedActions.includes(action)) {
             if (!token) throw new Error('Authentication token is required.');
@@ -55,6 +55,7 @@ export default async function handler(req, res) {
             case 'simplifyNews': responseData = await simplifyNews(payload.headline, payload.summary); break;
             case 'setCachedNews': await db.collection('newsCache').updateOne({ headline: payload.headline }, { $set: { simplifiedText: payload.simplifiedText } }, { upsert: true }); responseData = { success: true }; break;
             case 'getPortfolioAnalysis': responseData = await getPortfolioAnalysis(userData.username, payload.portfolioSummary); break;
+            case 'getLeaderboards': responseData = await getLeaderboards(db.collection('users'), userData); break;
             default: throw new Error(`Unknown action: ${action}`);
         }
         
@@ -73,7 +74,6 @@ async function registerUser(collection, { username, password }) {
     if (password !== TEACHER_REGISTRATION_PASSWORD) throw new Error('Invalid registration password.');
     if (await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } })) throw new Error('Username already exists.');
     
-    // Teachers will now also use the registration password as their login password.
     const hashedPassword = await bcrypt.hash(password, 10);
     const role = 'teacher';
     await collection.insertOne({ username, hashedPassword, role, cash: 0, stocks: [], teacherId: null });
@@ -83,9 +83,8 @@ async function registerUser(collection, { username, password }) {
 async function loginUser(collection, { username, password }) {
     const user = await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } });
     if (!user) throw new Error('Invalid credentials.');
-    
-    const isMatch = await bcrypt.compare(password, user.hashedPassword);
 
+    const isMatch = await bcrypt.compare(password, user.hashedPassword);
     if (!isMatch) throw new Error('Invalid credentials.');
 
     const token = jwt.sign({ userId: user._id, username: user.username, role: user.role }, process.env.JWT_SECRET, { expiresIn: '12h' });
@@ -159,7 +158,53 @@ async function executeTrade(collection, userId, { type, symbol, quantity, price 
     return { success: true, newPortfolio };
 }
 
-// --- FINANCIALMODELINGPREP (FMP) DATA PROXY ---
+// --- LEADERBOARD ---
+async function getLeaderboards(usersCollection, currentUser) {
+    const allUsers = await usersCollection.find({}, { projection: { username: 1, cash: 1, stocks: 1, teacherId: 1, role: 1 } }).toArray();
+    
+    const allSymbols = [...new Set(allUsers.flatMap(u => u.stocks ? u.stocks.map(s => s.symbol) : []))];
+
+    let quotes = {};
+    if (allSymbols.length > 0) {
+        quotes = await getQuotes(allSymbols);
+    }
+
+    const rankedUsers = allUsers.map(user => {
+        let stockValue = 0;
+        if (user.stocks) {
+            user.stocks.forEach(stock => {
+                const currentPrice = quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice;
+                stockValue += stock.shares * currentPrice;
+            });
+        }
+        return {
+            ...user,
+            totalValue: user.cash + stockValue
+        };
+    }).sort((a, b) => b.totalValue - a.totalValue);
+
+    const global = rankedUsers;
+    
+    let classLeaderboard = [];
+    if (currentUser.role === 'teacher') {
+        // Teacher sees themself and their students
+        const teacherId = new ObjectId(currentUser.userId);
+        classLeaderboard = rankedUsers.filter(user => user._id.equals(teacherId) || (user.teacherId && user.teacherId.equals(teacherId)));
+    } else {
+        // Student sees themself, their teacher, and fellow students
+        const student = allUsers.find(u => u._id.equals(new ObjectId(currentUser.userId)));
+        if (student && student.teacherId) {
+             classLeaderboard = rankedUsers.filter(user => (user.teacherId && user.teacherId.equals(student.teacherId)) || user._id.equals(student.teacherId));
+        } else {
+            // Student might not have a teacher, so their class is just them
+            classLeaderboard = rankedUsers.filter(user => user._id.equals(new ObjectId(currentUser.userId)));
+        }
+    }
+    
+    return { global, class: classLeaderboard };
+}
+
+// --- FMP DATA PROXY ---
 async function fmpApiCall(endpoint, params = {}) {
     const apiKey = process.env.FMP_API_KEY;
     if (!apiKey) throw new Error('FMP API key not configured on server.');

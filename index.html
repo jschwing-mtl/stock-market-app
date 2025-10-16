@@ -273,11 +273,9 @@
             messageDiv.textContent = 'Processing...';
             try {
                 const { newPortfolio } = await callApi('executeTrade', { type, symbol, quantity, price });
-                state.portfolio = newPortfolio; // Update state directly from backend response
+                state.portfolio = newPortfolio;
                 messageDiv.textContent = `Successfully ${type === 'buy' ? 'bought' : 'sold'} ${quantity} shares of ${symbol}!`;
                 messageDiv.className = 'mt-4 text-center text-green-600';
-                // No need to call attachPortfolioListeners, state is updated.
-                // The view will re-render when the page is visited again.
             } catch (error) {
                 messageDiv.textContent = `Error: ${error.message}`;
                 messageDiv.className = 'mt-4 text-center text-red-600';

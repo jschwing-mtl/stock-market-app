@@ -15,9 +15,8 @@
         }
         .chart-container {
             position: relative;
-            height: 50vh;
-            width: 80vw;
-            max-width: 800px;
+            height: 40vh;
+            width: 100%;
         }
         .time-range-btn.active {
             background-color: #4f46e5;
@@ -130,7 +129,7 @@
         }
 
         function TradeScreen() {
-            return `<div class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-2xl font-bold mb-4">Trade Stocks</h2><div class="flex space-x-2"><input type="text" id="search-input" placeholder="Search for 'iPhone', 'electric cars', etc..." class="flex-grow px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"><button id="search-button" class="bg-indigo-600 text-white px-6 py-2 rounded-md hover:bg-indigo-700">Search</button></div><div id="search-results" class="mt-6"></div></div><div id="modal-container"></div>`;
+            return `<div class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-2xl font-bold mb-4">Trade Stocks</h2><div class="flex space-x-2"><input type="text" id="search-input" placeholder="Search for 'iPhone', 'electric cars', etc..." class="flex-grow px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"><button id="search-button" class="bg-indigo-600 text-white px-6 py-2 rounded-md hover:bg-indigo-700">Search</button></div><div id="search-results" class="mt-6"></div><div id="trade-news-feed" class="mt-8"></div></div><div id="modal-container"></div>`;
         }
         
         function RosterScreen() {
@@ -184,7 +183,7 @@
                     state.portfolio.stocks.forEach(stock => { stock.currentPrice = quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice; });
                 }
                 renderNewsFeed(symbols);
-                renderPortfolioView(); // Call this after news
+                renderPortfolioView();
             } catch (error) {
                 console.error("Failed to load portfolio:", error);
                 contentDiv.innerHTML = `<div class="text-red-500">Could not load data. Please try again later.</div>`;
@@ -215,9 +214,9 @@
             document.getElementById('ai-analysis-btn').addEventListener('click', getPortfolioAnalysis);
         }
 
-        async function renderNewsFeed(symbols) {
-            const newsFeedDiv = document.getElementById('news-feed');
-            if (state.userData.role === 'teacher' || !symbols || symbols.length === 0) { newsFeedDiv.innerHTML = ''; return; }
+        async function renderNewsFeed(symbols, targetDivId = 'news-feed') {
+            const newsFeedDiv = document.getElementById(targetDivId);
+            if (!symbols || symbols.length === 0) { newsFeedDiv.innerHTML = ''; return; }
             newsFeedDiv.innerHTML = `<h2 class="text-2xl font-bold mb-4">Related News</h2><div id="news-loader">Loading news...</div>`;
             try {
                 const allNews = await callApi('getCompanyNews', { symbols });
@@ -247,14 +246,17 @@
         async function performSearch() {
             const query = document.getElementById('search-input').value;
             const resultsDiv = document.getElementById('search-results');
+            const newsDiv = document.getElementById('trade-news-feed');
             if (!query) return;
             resultsDiv.innerHTML = `<div>Searching...</div>`;
+            newsDiv.innerHTML = '';
             try {
                 const results = await callApi('intelligentSearch', { query });
                 state.searchResults = results;
                 if (state.searchResults.length === 0) { resultsDiv.innerHTML = `<div>No results found. Try a different search term.</div>`; return; }
-                const resultItems = state.searchResults.map(result => `<div class="flex justify-between items-center p-3 border-b hover:bg-gray-50"><div><p class="font-bold">${result.symbol}</p><p class="text-sm text-gray-600">${result.description}</p></div><div><button class="bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded-md hover:bg-purple-200" onclick="getCompanyExplanation('${result.description.replace(/'/g, "\\'")}', '${result.symbol}')">✨ Explain</button><button class="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600 ml-2" onclick="openTradeModal('${result.symbol}')">Trade</button></div></div>`).join('');
+                const resultItems = state.searchResults.map(result => `<div class="flex justify-between items-center p-3 border-b hover:bg-gray-50"><div><p class="font-bold">${result.symbol}</p><p class="text-sm text-gray-600">${result.description}</p></div><div class="flex items-center"><button class="text-indigo-600 hover:underline text-sm mr-4" onclick="showChart('${result.symbol}')">View Chart</button><button class="bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded-md hover:bg-purple-200" onclick="getCompanyExplanation('${result.description.replace(/'/g, "\\'")}', '${result.symbol}')">✨ Explain</button><button class="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600 ml-2" onclick="openTradeModal('${result.symbol}')">Trade</button></div></div>`).join('');
                 resultsDiv.innerHTML = resultItems;
+                renderNewsFeed(results.map(r => r.symbol), 'trade-news-feed');
             } catch (error) { resultsDiv.innerHTML = `<div class="text-red-500">Search failed: ${error.message}</div>`; }
         }
 

@@ -15,7 +15,7 @@
         }
         .chart-container {
             position: relative;
-            height: 40vh;
+            height: 50vh;
             width: 100%;
         }
         .time-range-btn.active {
@@ -99,6 +99,10 @@
                      appContainer.innerHTML = Navbar() + RosterScreen();
                      attachRosterListeners();
                      break;
+                case 'leaderboard':
+                    appContainer.innerHTML = Navbar() + LeaderboardScreen();
+                    attachLeaderboardListeners();
+                    break;
             }
         };
 
@@ -113,6 +117,7 @@
                     <div>
                         <button onclick="navigateTo('portfolio')" class="px-4 py-2 text-sm font-medium rounded-md hover:bg-gray-100">Portfolio</button>
                         <button onclick="navigateTo('trade')" class="px-4 py-2 text-sm font-medium rounded-md hover:bg-gray-100">Trade Stocks</button>
+                        <button onclick="navigateTo('leaderboard')" class="px-4 py-2 text-sm font-medium rounded-md hover:bg-gray-100">Leaderboards</button>
                         ${isTeacher ? `<button onclick="navigateTo('roster')" class="px-4 py-2 text-sm font-medium rounded-md hover:bg-gray-100">Student Roster</button>` : ''}
                         <button onclick="logout()" class="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-500 rounded-md hover:bg-red-600">Logout</button>
                     </div>
@@ -134,6 +139,21 @@
         
         function RosterScreen() {
             return `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">Student Roster</h2><button id="add-student-btn" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm">Add Student</button></div><div id="roster-list" class="space-y-2"></div></div><div id="modal-container"></div>`;
+        }
+
+        function LeaderboardScreen() {
+            return `
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-2xl font-bold mb-6 text-center">Leaderboards</h2>
+                    <div class="flex border-b mb-6">
+                        <button id="class-leaderboard-tab" class="flex-1 py-2 text-center font-semibold text-indigo-600 border-b-2 border-indigo-600">My Class</button>
+                        <button id="global-leaderboard-tab" class="flex-1 py-2 text-center font-semibold text-gray-500">Global</button>
+                    </div>
+                    <div id="leaderboard-content">
+                        <div id="leaderboard-loader" class="text-center">Loading leaderboard...</div>
+                    </div>
+                </div>
+            `;
         }
         
         function showMessage(msg, isError = true) {
@@ -476,6 +496,68 @@
                  document.getElementById('analysis-text').textContent = analysis;
             } catch(error) { document.getElementById('analysis-text').textContent = 'Could not get analysis at this time.'; }
         }
+        
+        async function attachLeaderboardListeners() {
+            const contentDiv = document.getElementById('leaderboard-content');
+            let leaderboardData; // To store the fetched data
+            
+            const classTab = document.getElementById('class-leaderboard-tab');
+            const globalTab = document.getElementById('global-leaderboard-tab');
+            
+            const renderLeaderboard = (type) => {
+                const data = type === 'class' ? leaderboardData.class : leaderboardData.global;
+                if (!data || data.length === 0) {
+                    contentDiv.innerHTML = `<div class="text-center">No players on this leaderboard yet.</div>`;
+                    return;
+                }
+                const rows = data.map((player, index) => `
+                    <tr class="border-b">
+                        <td class="py-3 px-4 font-medium">${index + 1}</td>
+                        <td class="py-3 px-4">${player.username}</td>
+                        <td class="py-3 px-4">$${player.totalValue.toFixed(2)}</td>
+                        <td class="py-3 px-4">$${player.cash.toFixed(2)}</td>
+                    </tr>
+                `).join('');
+                
+                contentDiv.innerHTML = `
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="py-3 px-4 font-semibold">Rank</th>
+                                    <th class="py-3 px-4 font-semibold">Name</th>
+                                    <th class="py-3 px-4 font-semibold">Total Value</th>
+                                    <th class="py-3 px-4 font-semibold">Cash Balance</th>
+                                </tr>
+                            </thead>
+                            <tbody>${rows}</tbody>
+                        </table>
+                    </div>
+                `;
+            };
+
+            classTab.addEventListener('click', () => {
+                globalTab.classList.remove('text-indigo-600', 'border-indigo-600');
+                globalTab.classList.add('text-gray-500');
+                classTab.classList.add('text-indigo-600', 'border-indigo-600');
+                renderLeaderboard('class');
+            });
+
+            globalTab.addEventListener('click', () => {
+                classTab.classList.remove('text-indigo-600', 'border-indigo-600');
+                classTab.classList.add('text-gray-500');
+                globalTab.classList.add('text-indigo-600', 'border-indigo-600');
+                renderLeaderboard('global');
+            });
+
+            try {
+                leaderboardData = await callApi('getLeaderboards');
+                renderLeaderboard('class'); // Default to class view
+            } catch (error) {
+                 contentDiv.innerHTML = `<div class="text-red-500">Could not load leaderboards.</div>`;
+            }
+        }
+
 
         function logout() {
             localStorage.removeItem('sessionToken');

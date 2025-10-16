@@ -83,22 +83,8 @@ async function registerUser(collection, { username, password }) {
 async function loginUser(collection, { username, password }) {
     const user = await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } });
     if (!user) throw new Error('Invalid credentials.');
-
-    // For teachers, we compare against the raw registration password. For students, the hashed one.
-    let isMatch;
-    if (user.role === 'teacher') {
-        const TEACHER_REGISTRATION_PASSWORD = "mtlgap2025";
-        // This logic is slightly flawed as teachers can't change their password, but it enforces the rule.
-        // A better system would hash the registration pass on creation and compare hashes.
-        isMatch = (password === TEACHER_REGISTRATION_PASSWORD);
-        if(isMatch && !(await bcrypt.compare(password, user.hashedPassword))){
-             // If the teacher logs in with the master password, but their hash doesn't match, update it.
-             const newHashedPassword = await bcrypt.hash(password, 10);
-             await collection.updateOne({ _id: user._id }, { $set: { hashedPassword: newHashedPassword } });
-        }
-    } else {
-        isMatch = await bcrypt.compare(password, user.hashedPassword);
-    }
+    
+    const isMatch = await bcrypt.compare(password, user.hashedPassword);
 
     if (!isMatch) throw new Error('Invalid credentials.');
 

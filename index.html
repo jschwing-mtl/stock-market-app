@@ -330,8 +330,8 @@
         function renderRoster() {
             const rosterDiv = document.getElementById('roster-list');
             if(state.studentRoster.length === 0) { rosterDiv.innerHTML = `<div class="p-3 text-center">You haven't added any students yet.</div>`; return; }
-            const rosterItems = state.studentRoster.map(student => `<div class="grid grid-cols-4 items-center p-3 border-b"><span>${student.username}</span><span>$${student.cash.toFixed(2)}</span><div><button class="text-sm text-green-600 hover:underline" onclick="openAdjustCashModal('${student._id}', '${student.username}', ${student.cash}, 'add')">Add Cash</button><button class="text-sm text-red-600 hover:underline ml-2" onclick="openAdjustCashModal('${student._id}', '${student.username}', ${student.cash}, 'remove')">Remove Cash</button></div><div class="text-right"><button class="text-sm text-red-500 hover:underline" onclick="removeStudent('${student._id}', '${student.username}')">Remove Student</button></div></div>`).join('');
-            rosterDiv.innerHTML = `<div class="grid grid-cols-4 p-3 font-semibold bg-gray-50"><span>Username</span><span>Cash Balance</span><span>Adjust Cash</span><span class="text-right">Actions</span></div>` + rosterItems;
+            const rosterItems = state.studentRoster.map(student => `<div class="grid grid-cols-5 items-center p-3 border-b"><span>${student.username}</span><span>$${student.cash.toFixed(2)}</span><div><button class="text-sm text-green-600 hover:underline" onclick="openAdjustCashModal('${student._id}', '${student.username}', ${student.cash}, 'add')">Add Cash</button><button class="text-sm text-red-600 hover:underline ml-2" onclick="openAdjustCashModal('${student._id}', '${student.username}', ${student.cash}, 'remove')">Remove Cash</button></div><div class="text-right"><button class="text-sm text-indigo-600 hover:underline" onclick="openEditStudentModal('${student._id}', '${student.username}')">Edit</button></div><div class="text-right"><button class="text-sm text-red-500 hover:underline" onclick="removeStudent('${student._id}', '${student.username}')">Remove</button></div></div>`).join('');
+            rosterDiv.innerHTML = `<div class="grid grid-cols-5 p-3 font-semibold bg-gray-50"><span>Username</span><span>Cash Balance</span><span>Adjust Cash</span><span class="text-right"></span><span class="text-right">Actions</span></div>` + rosterItems;
         }
 
         function openAddStudentModal() {
@@ -374,6 +374,54 @@
                     renderRoster();
                     closeModal();
                 } catch (error) { msgDiv.className = 'mt-4 text-center text-red-600'; msgDiv.textContent = `Error: ${error.message}`; }
+            });
+        }
+
+        function openEditStudentModal(studentId, currentUsername) {
+            const modalContent = `<h3 class="text-xl font-bold mb-4">Edit Student: ${currentUsername}</h3>
+                <div class="space-y-6">
+                    <div>
+                        <h4 class="font-semibold mb-2">Change Username</h4>
+                        <form id="edit-username-form" class="flex items-center space-x-2">
+                            <input type="text" id="new-username" value="${currentUsername}" required class="flex-grow border rounded-md px-3 py-2">
+                            <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-md">Save Username</button>
+                        </form>
+                    </div>
+                    <div class="border-t pt-4">
+                        <h4 class="font-semibold mb-2">Reset Password</h4>
+                        <form id="reset-password-form" class="flex items-center space-x-2">
+                            <input type="password" id="new-password" placeholder="Enter new password" required class="flex-grow border rounded-md px-3 py-2">
+                            <button type="submit" class="bg-orange-500 text-white px-4 py-2 rounded-md">Reset Password</button>
+                        </form>
+                    </div>
+                </div>
+                <div id="modal-message" class="mt-4 text-center"></div>`;
+            renderModal(modalContent);
+
+            document.getElementById('edit-username-form').addEventListener('submit', async e => {
+                e.preventDefault();
+                const newUsername = e.target.elements['new-username'].value;
+                if (confirm(`Are you sure you want to change this student's username to "${newUsername}"?`)) {
+                    try {
+                        await callApi('updateStudentCredentials', { studentId, newUsername });
+                        const student = state.studentRoster.find(s => s._id === studentId);
+                        student.username = newUsername;
+                        renderRoster();
+                        closeModal();
+                    } catch (error) { document.getElementById('modal-message').textContent = `Error: ${error.message}`; }
+                }
+            });
+
+            document.getElementById('reset-password-form').addEventListener('submit', async e => {
+                e.preventDefault();
+                const newPassword = e.target.elements['new-password'].value;
+                if (confirm("Are you sure you want to reset this student's password?")) {
+                    try {
+                        await callApi('updateStudentCredentials', { studentId, newPassword });
+                        alert("Password has been successfully reset!");
+                        closeModal();
+                    } catch (error) { document.getElementById('modal-message').textContent = `Error: ${error.message}`; }
+                }
             });
         }
         
@@ -576,7 +624,7 @@
             } else { navigateTo('login'); }
         }
 
-        window.navigateTo = navigateTo; window.logout = logout; window.openTradeModal = openTradeModal; window.closeModal = closeModal; window.showChart = showChart; window.simplifyNews = simplifyNews; window.getCompanyExplanation = getCompanyExplanation; window.openAddStudentModal = openAddStudentModal; window.openAdjustCashModal = openAdjustCashModal; window.removeStudent = removeStudent; window.updateChart = updateChart; window.openAdjustTeacherCashModal = openAdjustTeacherCashModal;
+        window.navigateTo = navigateTo; window.logout = logout; window.openTradeModal = openTradeModal; window.closeModal = closeModal; window.showChart = showChart; window.simplifyNews = simplifyNews; window.getCompanyExplanation = getCompanyExplanation; window.openAddStudentModal = openAddStudentModal; window.openAdjustCashModal = openAdjustCashModal; window.removeStudent = removeStudent; window.updateChart = updateChart; window.openAdjustTeacherCashModal = openAdjustTeacherCashModal; window.openEditStudentModal = openEditStudentModal;
         init();
         function render() { App(); }
     </script>

@@ -475,10 +475,18 @@
                     labels: filteredLabels,
                     datasets: [{
                         data: filteredData,
-                        borderColor: 'rgb(79, 70, 229)',
                         borderWidth: 2,
                         pointRadius: 0,
-                        tension: 0.1
+                        tension: 0.1,
+                        segment: {
+                            borderColor: ctx => {
+                                const y1 = ctx.p0.parsed.y;
+                                const y2 = ctx.p1.parsed.y;
+                                if (y2 > y1) return 'rgb(22, 163, 74)'; // Green for up
+                                if (y1 > y2) return 'rgb(220, 38, 38)'; // Red for down
+                                return 'rgb(234, 179, 8)'; // Yellow for same
+                            }
+                        }
                     }]
                 },
                 options: {

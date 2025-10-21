@@ -90,6 +90,7 @@
             searchResults: [],
             studentRoster: [],
             currentChart: { instance: null, data: null },
+            donutChart: null
         };
 
         function navigateTo(page) {
@@ -156,10 +157,16 @@
                 state.portfolio.stocks = portfolioData.stocks || [];
                 state.portfolio.achievements = portfolioData.achievements || [];
 
-                const symbols = state.portfolio.stocks.map(s => s.symbol);
+                let symbols = state.portfolio.stocks.map(s => s.symbol);
                 if (symbols.length > 0) {
-                    const quotes = await callApi('getQuotes', { symbols });
-                    state.portfolio.stocks.forEach(stock => { stock.currentPrice = quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice; });
+                    const [quotes, industryData] = await Promise.all([
+                        callApi('getQuotes', { symbols }),
+                        callApi('getStockIndustries', { symbols })
+                    ]);
+                    state.portfolio.stocks.forEach(stock => {
+                        stock.currentPrice = quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice;
+                        stock.industry = industryData[stock.symbol] || 'Other';
+                    });
                 }
                 
                 const { newAchievements } = await callApi('checkAndAwardAchievements');
@@ -186,9 +193,24 @@
                 const gainLossColor = gainLoss >= 0 ? 'text-green-600' : 'text-red-600';
                 return `<tr class="border-b"><td class="py-3 px-4 font-medium">${stock.symbol}</td><td class="py-3 px-4">${stock.shares}</td><td class="py-3 px-4">$${stock.purchasePrice.toFixed(2)}</td><td class="py-3 px-4">$${stock.currentPrice.toFixed(2)}</td><td class="py-3 px-4">$${currentValue.toFixed(2)}</td><td class="py-3 px-4 ${gainLossColor}">$${gainLoss.toFixed(2)} (${gainLossPercent.toFixed(2)}%)</td><td class="py-3 px-4"><button class="text-indigo-600 hover:underline" onclick="showChart('${stock.symbol}')">View Chart</button></td></tr>`;
             }).join('');
-
-            contentDiv.innerHTML = `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">My Portfolio</h2><button id="ai-analysis-btn" class="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 text-sm">✨ Get AI Portfolio Analysis</button></div><div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center mb-6"><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Total Value</h3><p class="text-2xl font-semibold">$${totalValue.toFixed(2)}</p></div><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Cash Balance</h3><p id="cash-balance-display" class="text-2xl font-semibold">$${state.portfolio.cash.toFixed(2)}</p>${teacherCashControls}</div></div><div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead class="bg-gray-50"><tr><th class="py-3 px-4 font-semibold">Symbol</th><th class="py-3 px-4 font-semibold">Shares</th><th class="py-3 px-4 font-semibold">Avg. Purchase Price</th><th class="py-3 px-4 font-semibold">Current Price</th><th class="py-3 px-4 font-semibold">Total Value</th><th class="py-3 px-4 font-semibold">Gain/Loss</th><th class="py-3 px-4 font-semibold">Actions</th></tr></thead><tbody>${stockRows.length > 0 ? stockRows : `<tr><td colspan="7" class="text-center py-4">You don't own any stocks yet. Go to the Trade page to buy some!</td></tr>`}</tbody></table></div></div>`;
+            const donutChartCanvas = (state.portfolio.stocks.length > 0) ? `<div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500 mb-2">Diversification</h3><div style="position: relative; height:120px"><canvas id="portfolioDonutChart"></canvas></div></div>` : `<div class="bg-gray-100 p-4 rounded-lg flex items-center justify-center"><p class="text-sm text-gray-500">Buy stocks to see your diversification.</p></div>`;
+            contentDiv.innerHTML = `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">My Portfolio</h2><button id="ai-analysis-btn" class="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 text-sm">✨ Get AI Portfolio Analysis</button></div><div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center mb-6"><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Total Value</h3><p class="text-2xl font-semibold">$${totalValue.toFixed(2)}</p></div><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Cash Balance</h3><p id="cash-balance-display" class="text-2xl font-semibold">$${state.portfolio.cash.toFixed(2)}</p>${teacherCashControls}</div>${donutChartCanvas}</div><div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead class="bg-gray-50"><tr><th class="py-3 px-4 font-semibold">Symbol</th><th class="py-3 px-4 font-semibold">Shares</th><th class="py-3 px-4 font-semibold">Avg. Purchase Price</th><th class="py-3 px-4 font-semibold">Current Price</th><th class="py-3 px-4 font-semibold">Total Value</th><th class="py-3 px-4 font-semibold">Gain/Loss</th><th class="py-3 px-4 font-semibold">Actions</th></tr></thead><tbody>${stockRows.length > 0 ? stockRows : `<tr><td colspan="7" class="text-center py-4">You don't own any stocks yet. Go to the Trade page to buy some!</td></tr>`}</tbody></table></div></div>`;
             document.getElementById('ai-analysis-btn').addEventListener('click', getPortfolioAnalysis);
+            if (state.portfolio.stocks.length > 0) renderDonutChart();
+        }
+
+        function renderDonutChart() {
+            const industryData = {};
+            state.portfolio.stocks.forEach(stock => {
+                const value = stock.shares * stock.currentPrice;
+                if(industryData[stock.industry]) { industryData[stock.industry] += value; } else { industryData[stock.industry] = value; }
+            });
+            const labels = Object.keys(industryData);
+            const data = Object.values(industryData);
+            const ctx = document.getElementById('portfolioDonutChart')?.getContext('2d');
+            if (!ctx) return;
+            if (state.donutChart) state.donutChart.destroy();
+            state.donutChart = new Chart(ctx, { type: 'doughnut', data: { labels: labels, datasets: [{ data: data, backgroundColor: ['#4f46e5', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#8b5cf6'], }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } } });
         }
 
         async function renderNewsFeed(symbols, targetDivId = 'news-feed') {
@@ -208,24 +230,13 @@
             const achievementsSection = document.getElementById('achievements-section');
             achievementsSection.innerHTML = `<h2 class="text-2xl font-bold mb-4">My Achievements</h2>`;
             const earnedAchievements = new Set(state.portfolio.achievements || []);
-            
             const badgeGrid = document.createElement('div');
             badgeGrid.className = 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4';
-            
             for (const badgeId in allAchievements) {
                 const achievement = allAchievements[badgeId];
                 const isEarned = earnedAchievements.has(badgeId);
                 const colorClass = isEarned ? 'text-yellow-500' : 'text-gray-400 opacity-50';
-
-                badgeGrid.innerHTML += `
-                    <div class="relative has-tooltip flex flex-col items-center p-4 bg-white rounded-lg shadow-sm border border-gray-200">
-                        <div class="${colorClass}">${achievement.svg}</div>
-                        <p class="mt-2 text-sm font-semibold text-center">${achievement.name}</p>
-                        <div class="tooltip absolute z-10 bottom-full mb-2 w-48 p-2 text-xs text-white bg-gray-800 rounded-md shadow-lg text-center">
-                            ${achievement.description}
-                        </div>
-                    </div>
-                `;
+                badgeGrid.innerHTML += `<div class="relative has-tooltip flex flex-col items-center p-4 bg-white rounded-lg shadow-sm border border-gray-200"><div class="${colorClass}">${achievement.svg}</div><p class="mt-2 text-sm font-semibold text-center">${achievement.name}</p><div class="tooltip absolute z-10 bottom-full mb-2 w-48 p-2 text-xs text-white bg-gray-800 rounded-md shadow-lg text-center">${achievement.description}</div></div>`;
             }
             achievementsSection.appendChild(badgeGrid);
         }

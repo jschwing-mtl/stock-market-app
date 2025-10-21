@@ -27,7 +27,7 @@ export default async function handler(req, res) {
         const { action, payload, token } = req.body;
         let userData;
 
-        const protectedActions = ['getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'getQuotes', 'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 'getLeaderboards', 'checkAndAwardAchievements', 'getStockIndustries'];
+        const protectedActions = ['getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'toggleTradingStatus', 'getQuotes', 'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 'getLeaderboards', 'checkAndAwardAchievements', 'getStockIndustries'];
         
         if (protectedActions.includes(action)) {
             if (!token) throw new Error('Authentication token is required.');
@@ -46,6 +46,7 @@ export default async function handler(req, res) {
             case 'updateStudentCash': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await updateStudentCash(db.collection('users'), payload.studentId, payload.amount, userData.userId); break;
             case 'updateTeacherCash': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await updateTeacherCash(db.collection('users'), userData.userId, payload.amount); break;
             case 'updateStudentCredentials': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await updateStudentCredentials(db.collection('users'), payload.studentId, userData.userId, payload.newUsername, payload.newPassword); break;
+            case 'toggleTradingStatus': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await toggleTradingStatus(db.collection('users'), payload.studentId, payload.isPaused, userData.userId); break;
             case 'getPortfolio': responseData = await getPortfolio(db.collection('users'), userData.userId); break;
             case 'executeTrade': responseData = await executeTrade(db.collection('users'), userData.userId, payload); break;
             case 'getQuotes': responseData = await getQuotes(payload.symbols); break;
@@ -96,8 +97,8 @@ async function loginUser(collection, { username, password }) {
 async function addStudent(collection, { username, password, startingCash, teacherId }) {
     if (await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } })) throw new Error('Username already exists.');
     const hashedPassword = await bcrypt.hash(password, 10);
-    const { insertedId } = await collection.insertOne({ username, hashedPassword, role: 'student', cash: startingCash || 100000, stocks: [], achievements: [], teacherId: new ObjectId(teacherId) });
-    return { _id: insertedId, username, cash: startingCash || 100000 };
+    const { insertedId } = await collection.insertOne({ username, hashedPassword, role: 'student', cash: startingCash || 100000, stocks: [], achievements: [], isTradingPaused: false, teacherId: new ObjectId(teacherId) });
+    return { _id: insertedId, username, cash: startingCash || 100000, isTradingPaused: false };
 }
 
 async function getStudentRoster(collection, teacherId) { return await collection.find({ teacherId: new ObjectId(teacherId) }).project({ hashedPassword: 0 }).toArray(); }
@@ -118,9 +119,22 @@ async function updateStudentCredentials(collection, studentId, teacherId, newUse
     return { success: true };
 }
 
+async function toggleTradingStatus(collection, studentId, isPaused, teacherId) {
+    const teacherObjectId = new ObjectId(teacherId);
+    let filter;
+    if (studentId) { // Individual student
+        filter = { _id: new ObjectId(studentId), teacherId: teacherObjectId };
+    } else { // All students for the teacher
+        filter = { teacherId: teacherObjectId };
+    }
+    await collection.updateMany(filter, { $set: { isTradingPaused: isPaused } });
+    const updatedStudents = await collection.find(filter).project({_id: 1, isTradingPaused: 1}).toArray();
+    return { success: true, updatedStudents };
+}
+
 // --- PORTFOLIO & TRADING ---
 async function getPortfolio(collection, userId) {
-    const user = await collection.findOne({ _id: new ObjectId(userId) }, { projection: { cash: 1, stocks: 1, achievements: 1 } });
+    const user = await collection.findOne({ _id: new ObjectId(userId) }, { projection: { cash: 1, stocks: 1, achievements: 1, isTradingPaused: 1 } });
     if (!user) throw new Error('User not found.');
     return user;
 }
@@ -128,6 +142,8 @@ async function getPortfolio(collection, userId) {
 async function executeTrade(collection, userId, { type, symbol, quantity, price }) {
     const user = await collection.findOne({ _id: new ObjectId(userId) });
     if (!user) throw new Error('User not found.');
+    if (user.isTradingPaused) throw new Error("Trading is currently paused by your teacher.");
+    
     let { cash, stocks, achievements } = user;
     stocks = stocks || [];
     achievements = achievements || [];

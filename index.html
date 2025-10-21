@@ -22,6 +22,15 @@
             background-color: #4f46e5;
             color: white;
         }
+        .tooltip {
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .has-tooltip:hover .tooltip {
+            visibility: visible;
+            opacity: 1;
+        }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-800">
@@ -31,7 +40,17 @@
 
     <script>
         // --- CONFIGURATION ---
-        const API_ENDPOINT = '/api/api'; // Correct endpoint for Vercel
+        const API_ENDPOINT = '/api/api';
+
+        // --- MASTER DATA ---
+        const allAchievements = {
+            FIRST_TRADE: { name: "First Step!", description: "Made your first stock trade.", svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-12 h-12"><path d="M12.378 1.602a.75.75 0 00-.756 0L3 6.632l9 5.25 9-5.25-8.622-5.03zM21.75 7.93l-9 5.25v9l8.628-5.032a.75.75 0 00.372-.648V7.93zM11.25 22.18v-9l-9-5.25v8.57a.75.75 0 00.372.648l8.628 5.033z"></path></svg>` },
+            PROFIT_MAKER: { name: "Profit Maker", description: "Sold a stock for a profit.", svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-12 h-12"><path d="M12 7.5a2.25 2.25 0 100 4.5 2.25 2.25 0 000-4.5z"></path><path fill-rule="evenodd" d="M1.5 4.5a3 3 0 013-3h15a3 3 0 013 3v15a3 3 0 01-3 3h-15a3 3 0 01-3-3V4.5zM8.25 9a3.75 3.75 0 117.5 0 3.75 3.75 0 01-7.5 0zM18.75 9a.75.75 0 00-.75.75v.008c0 .414.336.75.75.75h.008a.75.75 0 00.75-.75V9.75a.75.75 0 00-.75-.75h-.008zM4.5 9.75A.75.75 0 015.25 9h.008a.75.75 0 01.75.75v.008a.75.75 0 01-.75.75H5.25a.75.75 0 01-.75-.75V9.75z" clip-rule="evenodd"></path></svg>` },
+            DIVERSIFIED_INVESTOR: { name: "Diversified Investor", description: "Own stocks from 3 different industries.", svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-12 h-12"><path fill-rule="evenodd" d="M2.25 13.5a8.25 8.25 0 018.25-8.25.75.75 0 01.75.75v6.75H18a.75.75 0 01.75.75 8.25 8.25 0 01-16.5 0z" clip-rule="evenodd"></path><path fill-rule="evenodd" d="M12.75 3a.75.75 0 01.75-.75 8.25 8.25 0 018.25 8.25.75.75 0 01-.75.75h-7.5a.75.75 0 01-.75-.75V3z" clip-rule="evenodd"></path></svg>` },
+            PATIENT_INVESTOR: { name: "Patient Investor", description: "Held a stock for more than 30 days.", svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-12 h-12"><path fill-rule="evenodd" d="M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zM12.75 6a.75.75 0 00-1.5 0v6c0 .414.336.75.75.75h6a.75.75 0 000-1.5h-5.25V6z" clip-rule="evenodd"></path></svg>` },
+            MARKET_MASTER: { name: "Market Master", description: "Portfolio value reached $125,000.", svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-12 h-12"><path d="M13.5 4.06c0-1.336-1.616-2.005-2.56-1.06l-4.5 4.5H4.508c-1.141 0-2.318.664-2.66 1.905A9.76 9.76 0 001.5 12c0 .898.121 1.768.35 2.595.341 1.24 1.518 1.905 2.66 1.905H6.44l4.5 4.5c.944.945 2.56.276 2.56-1.06V4.06zM18.584 5.106a.75.75 0 011.06 0c3.808 3.807 3.808 9.98 0 13.788a.75.75 0 11-1.06-1.06 8.25 8.25 0 000-11.668.75.75 0 010-1.06z"></path><path d="M15.932 7.757a.75.75 0 011.061 0 6 6 0 010 8.486.75.75 0 01-1.06-1.061 4.5 4.5 0 000-6.364.75.75 0 010-1.06z"></path></svg>`}
+        };
+
 
         // --- API & DATA HANDLING ---
         async function callApi(action, payload = {}) {
@@ -67,7 +86,7 @@
         const state = {
             currentPage: 'login',
             userData: null,
-            portfolio: { cash: 0, stocks: [] },
+            portfolio: { cash: 0, stocks: [], achievements: [] },
             searchResults: [],
             studentRoster: [],
             currentChart: { instance: null, data: null },
@@ -83,26 +102,11 @@
             const appContainer = document.getElementById('app');
             appContainer.innerHTML = '';
             switch (state.currentPage) {
-                case 'login':
-                    appContainer.innerHTML = LoginScreen();
-                    attachLoginListeners();
-                    break;
-                case 'portfolio':
-                    appContainer.innerHTML = Navbar() + PortfolioScreen();
-                    attachPortfolioListeners();
-                    break;
-                case 'trade':
-                    appContainer.innerHTML = Navbar() + TradeScreen();
-                    attachTradeListeners();
-                    break;
-                case 'roster':
-                     appContainer.innerHTML = Navbar() + RosterScreen();
-                     attachRosterListeners();
-                     break;
-                case 'leaderboard':
-                    appContainer.innerHTML = Navbar() + LeaderboardScreen();
-                    attachLeaderboardListeners();
-                    break;
+                case 'login': appContainer.innerHTML = LoginScreen(); attachLoginListeners(); break;
+                case 'portfolio': appContainer.innerHTML = Navbar() + PortfolioScreen(); attachPortfolioListeners(); break;
+                case 'trade': appContainer.innerHTML = Navbar() + TradeScreen(); attachTradeListeners(); break;
+                case 'roster': appContainer.innerHTML = Navbar() + RosterScreen(); attachRosterListeners(); break;
+                case 'leaderboard': appContainer.innerHTML = Navbar() + LeaderboardScreen(); attachLeaderboardListeners(); break;
             }
         };
 
@@ -125,60 +129,14 @@
             `;
         }
         
-        function LoginScreen() {
-            return `<div class="min-h-screen flex items-center justify-center"><div class="bg-white p-8 rounded-lg shadow-lg w-full max-w-md"><h2 class="text-2xl font-bold mb-6 text-center text-gray-800">Welcome!</h2><div class="flex border-b mb-6"><button id="login-tab" class="flex-1 py-2 text-center font-semibold text-indigo-600 border-b-2 border-indigo-600">Sign In</button><button id="signup-tab" class="flex-1 py-2 text-center font-semibold text-gray-500">New Teacher Registration</button></div><form id="login-form" class="space-y-4"><div><label for="login-username" class="block text-sm font-medium text-gray-700">Username</label><input type="text" id="login-username" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></div><div><label for="login-password" class="block text-sm font-medium text-gray-700">Password</label><input type="password" id="login-password" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></div><button type="submit" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Sign In</button></form><form id="signup-form" class="hidden space-y-4"><div><label for="signup-username" class="block text-sm font-medium text-gray-700">Teacher Username</label><input type="text" id="signup-username" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></div><div><label for="signup-password" class="block text-sm font-medium text-gray-700">Registration Password</label><input type="password" id="signup-password" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="Enter the teacher registration password"></div><button type="submit" class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">Register Teacher Account</button></form><div id="message-area" class="mt-4 text-center text-red-500"></div></div></div>`;
-        }
-
-        function PortfolioScreen() {
-             return `<div id="portfolio-content" class="space-y-6"><div id="portfolio-loader" class="text-center">Loading portfolio...</div></div><div id="news-feed" class="mt-8"></div><div id="modal-container"></div>`;
-        }
-
-        function TradeScreen() {
-            return `<div class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-2xl font-bold mb-4">Trade Stocks</h2><div class="flex space-x-2"><input type="text" id="search-input" placeholder="Search for 'iPhone', 'electric cars', etc..." class="flex-grow px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"><button id="search-button" class="bg-indigo-600 text-white px-6 py-2 rounded-md hover:bg-indigo-700">Search</button></div><div id="search-results" class="mt-6"></div><div id="trade-news-feed" class="mt-8"></div></div><div id="modal-container"></div>`;
-        }
-        
-        function RosterScreen() {
-            return `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">Student Roster</h2><button id="add-student-btn" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm">Add Student</button></div><div id="roster-list" class="space-y-2"></div></div><div id="modal-container"></div>`;
-        }
-
-        function LeaderboardScreen() {
-            return `
-                <div class="bg-white p-6 rounded-lg shadow-md">
-                    <h2 class="text-2xl font-bold mb-6 text-center">Leaderboards</h2>
-                    <div class="flex border-b mb-6">
-                        <button id="class-leaderboard-tab" class="flex-1 py-2 text-center font-semibold text-indigo-600 border-b-2 border-indigo-600">My Class</button>
-                        <button id="global-leaderboard-tab" class="flex-1 py-2 text-center font-semibold text-gray-500">Global</button>
-                    </div>
-                    <div id="leaderboard-content">
-                        <div id="leaderboard-loader" class="text-center">Loading leaderboard...</div>
-                    </div>
-                </div>
-            `;
-        }
-        
-        function showMessage(msg, isError = true) {
-            const messageArea = document.getElementById('message-area');
-            if (messageArea) {
-                messageArea.textContent = msg;
-                messageArea.className = isError ? 'mt-4 text-center text-red-500' : 'mt-4 text-center text-green-500';
-            }
-        }
-
-        function renderModal(content) {
-            const modalContainer = document.getElementById('modal-container');
-            if (modalContainer) {
-                modalContainer.innerHTML = `<div class="fixed inset-0 modal-bg flex items-center justify-center z-50"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl relative"><button onclick="closeModal()" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800 text-2xl">&times;</button>${content}</div></div>`;
-            }
-        }
-
-        function closeModal() {
-            const modalContainer = document.getElementById('modal-container');
-            if (modalContainer) modalContainer.innerHTML = '';
-            if (state.currentChart.instance) {
-                state.currentChart.instance.destroy();
-                state.currentChart = { instance: null, data: null };
-            }
-        }
+        function LoginScreen() { return `<div class="min-h-screen flex items-center justify-center"><div class="bg-white p-8 rounded-lg shadow-lg w-full max-w-md"><h2 class="text-2xl font-bold mb-6 text-center text-gray-800">Welcome!</h2><div class="flex border-b mb-6"><button id="login-tab" class="flex-1 py-2 text-center font-semibold text-indigo-600 border-b-2 border-indigo-600">Sign In</button><button id="signup-tab" class="flex-1 py-2 text-center font-semibold text-gray-500">New Teacher Registration</button></div><form id="login-form" class="space-y-4"><div><label for="login-username" class="block text-sm font-medium text-gray-700">Username</label><input type="text" id="login-username" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></div><div><label for="login-password" class="block text-sm font-medium text-gray-700">Password</label><input type="password" id="login-password" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></div><button type="submit" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Sign In</button></form><form id="signup-form" class="hidden space-y-4"><div><label for="signup-username" class="block text-sm font-medium text-gray-700">Teacher Username</label><input type="text" id="signup-username" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></div><div><label for="signup-password" class="block text-sm font-medium text-gray-700">Registration Password</label><input type="password" id="signup-password" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="Enter the teacher registration password"></div><button type="submit" class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">Register Teacher Account</button></form><div id="message-area" class="mt-4 text-center text-red-500"></div></div></div>`; }
+        function PortfolioScreen() { return `<div id="portfolio-content" class="space-y-6"><div id="portfolio-loader" class="text-center">Loading portfolio...</div></div><div id="achievements-section" class="mt-8"></div><div id="news-feed" class="mt-8"></div><div id="modal-container"></div>`; }
+        function TradeScreen() { return `<div class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-2xl font-bold mb-4">Trade Stocks</h2><div class="flex space-x-2"><input type="text" id="search-input" placeholder="Search for 'iPhone', 'electric cars', etc..." class="flex-grow px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"><button id="search-button" class="bg-indigo-600 text-white px-6 py-2 rounded-md hover:bg-indigo-700">Search</button></div><div id="search-results" class="mt-6"></div><div id="trade-news-feed" class="mt-8"></div></div><div id="modal-container"></div>`; }
+        function RosterScreen() { return `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">Student Roster</h2><button id="add-student-btn" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm">Add Student</button></div><div id="roster-list" class="space-y-2"></div></div><div id="modal-container"></div>`; }
+        function LeaderboardScreen() { return `<div class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-2xl font-bold mb-6 text-center">Leaderboards</h2><div class="flex border-b mb-6"><button id="class-leaderboard-tab" class="flex-1 py-2 text-center font-semibold text-indigo-600 border-b-2 border-indigo-600">My Class</button><button id="global-leaderboard-tab" class="flex-1 py-2 text-center font-semibold text-gray-500">Global</button></div><div id="leaderboard-content"><div id="leaderboard-loader" class="text-center">Loading leaderboard...</div></div></div>`; }
+        function showMessage(msg, isError = true) { const el = document.getElementById('message-area'); if(el) { el.textContent = msg; el.className = isError ? 'mt-4 text-center text-red-500' : 'mt-4 text-center text-green-500'; } }
+        function renderModal(content) { const el = document.getElementById('modal-container'); if(el) { el.innerHTML = `<div class="fixed inset-0 modal-bg flex items-center justify-center z-50"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl relative"><button onclick="closeModal()" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800 text-2xl">&times;</button>${content}</div></div>`; } }
+        function closeModal() { const el = document.getElementById('modal-container'); if(el) el.innerHTML = ''; if (state.currentChart.instance) { state.currentChart.instance.destroy(); state.currentChart = { instance: null, data: null }; } }
 
         // --- EVENT LISTENERS & LOGIC ---
         function attachLoginListeners() {
@@ -196,14 +154,21 @@
                 const portfolioData = await callApi('getPortfolio');
                 state.portfolio.cash = portfolioData.cash;
                 state.portfolio.stocks = portfolioData.stocks || [];
-                
+                state.portfolio.achievements = portfolioData.achievements || [];
+
                 const symbols = state.portfolio.stocks.map(s => s.symbol);
                 if (symbols.length > 0) {
                     const quotes = await callApi('getQuotes', { symbols });
                     state.portfolio.stocks.forEach(stock => { stock.currentPrice = quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice; });
                 }
-                renderNewsFeed(symbols);
+                
+                const { newAchievements } = await callApi('checkAndAwardAchievements');
+                state.portfolio.achievements = newAchievements;
+
                 renderPortfolioView();
+                renderNewsFeed(symbols);
+                renderAchievements();
+
             } catch (error) {
                 console.error("Failed to load portfolio:", error);
                 contentDiv.innerHTML = `<div class="text-red-500">Could not load data. Please try again later.</div>`;
@@ -213,17 +178,9 @@
         function renderPortfolioView() {
             const contentDiv = document.getElementById('portfolio-content');
             const isTeacher = state.userData.role === 'teacher';
-            
             let totalValue = state.portfolio.cash;
             state.portfolio.stocks.forEach(s => totalValue += s.shares * s.currentPrice);
-            
-            const teacherCashControls = isTeacher ? `
-                <div class="mt-2 flex justify-center space-x-2">
-                    <button class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-md hover:bg-green-200" onclick="openAdjustTeacherCashModal('add')">Add Cash</button>
-                    <button class="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-md hover:bg-red-200" onclick="openAdjustTeacherCashModal('remove')">Remove Cash</button>
-                </div>
-            ` : '';
-            
+            const teacherCashControls = isTeacher ? `<div class="mt-2 flex justify-center space-x-2"><button class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-md hover:bg-green-200" onclick="openAdjustTeacherCashModal('add')">Add Cash</button><button class="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-md hover:bg-red-200" onclick="openAdjustTeacherCashModal('remove')">Remove Cash</button></div>` : '';
             const stockRows = state.portfolio.stocks.map(stock => {
                 const currentValue = stock.shares * stock.currentPrice, purchaseValue = stock.shares * stock.purchasePrice, gainLoss = currentValue - purchaseValue, gainLossPercent = purchaseValue !== 0 ? (gainLoss / purchaseValue) * 100 : 0;
                 const gainLossColor = gainLoss >= 0 ? 'text-green-600' : 'text-red-600';
@@ -245,6 +202,25 @@
                 document.getElementById('news-loader').remove();
                 newsFeedDiv.innerHTML += newsItems;
             } catch (error) { document.getElementById('news-loader').textContent = 'Could not load news.'; }
+        }
+
+        function renderAchievements() {
+            const achievementsSection = document.getElementById('achievements-section');
+            achievementsSection.innerHTML = `<h2 class="text-2xl font-bold mb-4">My Achievements</h2>`;
+            const earnedAchievements = state.portfolio.achievements;
+            if (!earnedAchievements || earnedAchievements.length === 0) {
+                achievementsSection.innerHTML += `<div class="bg-white p-4 rounded-lg shadow-sm text-center text-gray-500">You haven't earned any badges yet. Start trading!</div>`;
+                return;
+            }
+            const badgeGrid = document.createElement('div');
+            badgeGrid.className = 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4';
+            earnedAchievements.forEach(badgeId => {
+                const achievement = allAchievements[badgeId];
+                if (achievement) {
+                    badgeGrid.innerHTML += `<div class="relative has-tooltip flex flex-col items-center p-4 bg-white rounded-lg shadow-sm border border-gray-200"><div class="text-yellow-500">${achievement.svg}</div><p class="mt-2 text-sm font-semibold text-center">${achievement.name}</p><div class="tooltip absolute z-10 bottom-full mb-2 w-48 p-2 text-xs text-white bg-gray-800 rounded-md shadow-lg text-center">${achievement.description}</div></div>`;
+                }
+            });
+            achievementsSection.appendChild(badgeGrid);
         }
 
         async function simplifyNews(id, headline, summary) {
@@ -378,26 +354,8 @@
         }
 
         function openEditStudentModal(studentId, currentUsername) {
-            const modalContent = `<h3 class="text-xl font-bold mb-4">Edit Student: ${currentUsername}</h3>
-                <div class="space-y-6">
-                    <div>
-                        <h4 class="font-semibold mb-2">Change Username</h4>
-                        <form id="edit-username-form" class="flex items-center space-x-2">
-                            <input type="text" id="new-username" value="${currentUsername}" required class="flex-grow border rounded-md px-3 py-2">
-                            <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-md">Save Username</button>
-                        </form>
-                    </div>
-                    <div class="border-t pt-4">
-                        <h4 class="font-semibold mb-2">Reset Password</h4>
-                        <form id="reset-password-form" class="flex items-center space-x-2">
-                            <input type="password" id="new-password" placeholder="Enter new password" required class="flex-grow border rounded-md px-3 py-2">
-                            <button type="submit" class="bg-orange-500 text-white px-4 py-2 rounded-md">Reset Password</button>
-                        </form>
-                    </div>
-                </div>
-                <div id="modal-message" class="mt-4 text-center"></div>`;
+            const modalContent = `<h3 class="text-xl font-bold mb-4">Edit Student: ${currentUsername}</h3><div class="space-y-6"><div><h4 class="font-semibold mb-2">Change Username</h4><form id="edit-username-form" class="flex items-center space-x-2"><input type="text" id="new-username" value="${currentUsername}" required class="flex-grow border rounded-md px-3 py-2"><button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-md">Save Username</button></form></div><div class="border-t pt-4"><h4 class="font-semibold mb-2">Reset Password</h4><form id="reset-password-form" class="flex items-center space-x-2"><input type="password" id="new-password" placeholder="Enter new password" required class="flex-grow border rounded-md px-3 py-2"><button type="submit" class="bg-orange-500 text-white px-4 py-2 rounded-md">Reset Password</button></form></div></div><div id="modal-message" class="mt-4 text-center"></div>`;
             renderModal(modalContent);
-
             document.getElementById('edit-username-form').addEventListener('submit', async e => {
                 e.preventDefault();
                 const newUsername = e.target.elements['new-username'].value;
@@ -411,7 +369,6 @@
                     } catch (error) { document.getElementById('modal-message').textContent = `Error: ${error.message}`; }
                 }
             });
-
             document.getElementById('reset-password-form').addEventListener('submit', async e => {
                 e.preventDefault();
                 const newPassword = e.target.elements['new-password'].value;
@@ -434,7 +391,7 @@
                 state.currentChart.data = data;
                 document.getElementById('chart-loader').remove();
                 renderTimeRangeButtons();
-                updateChart(document.querySelector('#chart-time-ranges button:nth-child(5)'), '1Y'); // Default to 1 year
+                updateChart(document.querySelector('#chart-time-ranges button:nth-child(5)'), '1Y');
             } catch (error) { document.getElementById('chart-loader').textContent = `Could not load chart: ${error.message}`; }
         }
 
@@ -447,11 +404,9 @@
         function updateChart(btn, range) {
             document.querySelectorAll('.time-range-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-
             const { c, t } = state.currentChart.data;
             const now = new Date();
             let startDate = new Date();
-
             switch (range) {
                 case '1W': startDate.setDate(now.getDate() - 7); break;
                 case '1M': startDate.setMonth(now.getMonth() - 1); break;
@@ -461,14 +416,11 @@
                 case '5Y': startDate.setFullYear(now.getFullYear() - 5); break;
                 case 'All': startDate = new Date(t[0] * 1000); break;
             }
-
             const startIndex = t.findIndex(ts => (ts * 1000) >= startDate.getTime());
             const filteredLabels = t.slice(startIndex).map(ts => new Date(ts * 1000));
             const filteredData = c.slice(startIndex);
-
             const ctx = document.getElementById('stockChart').getContext('2d');
             if (state.currentChart.instance) state.currentChart.instance.destroy();
-
             state.currentChart.instance = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -493,28 +445,13 @@
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
-                    scales: {
-                        x: {
-                            type: 'time',
-                            time: { unit: 'month' },
-                            grid: { display: false },
-                            ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 7 }
-                        },
-                        y: {
-                            grid: { color: '#e5e7eb' },
-                            ticks: { callback: value => '$' + value }
-                        }
-                    }
+                    scales: { x: { type: 'time', time: { unit: 'month' }, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 7 } }, y: { grid: { color: '#e5e7eb' }, ticks: { callback: value => '$' + value } } }
                 }
             });
         }
         
         function openAdjustTeacherCashModal(type) {
-            const modalContent = `<h3 class="text-xl font-bold mb-4">${type === 'add' ? 'Add' : 'Remove'} Cash</h3>
-                <form id="adjust-teacher-cash-form" class="space-y-4">
-                    <div><label for="cash-amount">Amount</label><input type="number" id="cash-amount" min="0.01" step="0.01" required class="mt-1 w-full border rounded-md px-3 py-2"></div>
-                    <button type="submit" class="w-full bg-indigo-600 text-white py-2 rounded-md">${type === 'add' ? 'Add to Balance' : 'Remove from Balance'}</button>
-                </form><div id="modal-message" class="mt-4 text-center"></div>`;
+            const modalContent = `<h3 class="text-xl font-bold mb-4">${type === 'add' ? 'Add' : 'Remove'} Cash</h3><form id="adjust-teacher-cash-form" class="space-y-4"><div><label for="cash-amount">Amount</label><input type="number" id="cash-amount" min="0.01" step="0.01" required class="mt-1 w-full border rounded-md px-3 py-2"></div><button type="submit" class="w-full bg-indigo-600 text-white py-2 rounded-md">${type === 'add' ? 'Add to Balance' : 'Remove from Balance'}</button></form><div id="modal-message" class="mt-4 text-center"></div>`;
             renderModal(modalContent);
             document.getElementById('adjust-teacher-cash-form').addEventListener('submit', async e => {
                 e.preventDefault();
@@ -555,63 +492,18 @@
         
         async function attachLeaderboardListeners() {
             const contentDiv = document.getElementById('leaderboard-content');
-            let leaderboardData; // To store the fetched data
-            
+            let leaderboardData; 
             const classTab = document.getElementById('class-leaderboard-tab');
             const globalTab = document.getElementById('global-leaderboard-tab');
-            
             const renderLeaderboard = (type) => {
                 const data = type === 'class' ? leaderboardData.class : leaderboardData.global;
-                if (!data || data.length === 0) {
-                    contentDiv.innerHTML = `<div class="text-center">No players on this leaderboard yet.</div>`;
-                    return;
-                }
-                const rows = data.map((player, index) => `
-                    <tr class="border-b">
-                        <td class="py-3 px-4 font-medium">${index + 1}</td>
-                        <td class="py-3 px-4">${player.username}</td>
-                        <td class="py-3 px-4">$${player.totalValue.toFixed(2)}</td>
-                        <td class="py-3 px-4">$${player.cash.toFixed(2)}</td>
-                    </tr>
-                `).join('');
-                
-                contentDiv.innerHTML = `
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm text-left">
-                            <thead class="bg-gray-50">
-                                <tr>
-                                    <th class="py-3 px-4 font-semibold">Rank</th>
-                                    <th class="py-3 px-4 font-semibold">Name</th>
-                                    <th class="py-3 px-4 font-semibold">Total Value</th>
-                                    <th class="py-3 px-4 font-semibold">Cash Balance</th>
-                                </tr>
-                            </thead>
-                            <tbody>${rows}</tbody>
-                        </table>
-                    </div>
-                `;
+                if (!data || data.length === 0) { contentDiv.innerHTML = `<div class="text-center">No players on this leaderboard yet.</div>`; return; }
+                const rows = data.map((player, index) => `<tr class="border-b"><td class="py-3 px-4 font-medium">${index + 1}</td><td class="py-3 px-4">${player.username}</td><td class="py-3 px-4">$${player.totalValue.toFixed(2)}</td><td class="py-3 px-4">$${player.cash.toFixed(2)}</td></tr>`).join('');
+                contentDiv.innerHTML = `<div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead class="bg-gray-50"><tr><th class="py-3 px-4 font-semibold">Rank</th><th class="py-3 px-4 font-semibold">Name</th><th class="py-3 px-4 font-semibold">Total Value</th><th class="py-3 px-4 font-semibold">Cash Balance</th></tr></thead><tbody>${rows}</tbody></table></div>`;
             };
-
-            classTab.addEventListener('click', () => {
-                globalTab.classList.remove('text-indigo-600', 'border-indigo-600');
-                globalTab.classList.add('text-gray-500');
-                classTab.classList.add('text-indigo-600', 'border-indigo-600');
-                renderLeaderboard('class');
-            });
-
-            globalTab.addEventListener('click', () => {
-                classTab.classList.remove('text-indigo-600', 'border-indigo-600');
-                classTab.classList.add('text-gray-500');
-                globalTab.classList.add('text-indigo-600', 'border-indigo-600');
-                renderLeaderboard('global');
-            });
-
-            try {
-                leaderboardData = await callApi('getLeaderboards');
-                renderLeaderboard('class'); // Default to class view
-            } catch (error) {
-                 contentDiv.innerHTML = `<div class="text-red-500">Could not load leaderboards.</div>`;
-            }
+            classTab.addEventListener('click', () => { globalTab.classList.remove('text-indigo-600', 'border-indigo-600'); globalTab.classList.add('text-gray-500'); classTab.classList.add('text-indigo-600', 'border-indigo-600'); renderLeaderboard('class'); });
+            globalTab.addEventListener('click', () => { classTab.classList.remove('text-indigo-600', 'border-indigo-600'); classTab.classList.add('text-gray-500'); globalTab.classList.add('text-indigo-600', 'border-indigo-600'); renderLeaderboard('global'); });
+            try { leaderboardData = await callApi('getLeaderboards'); renderLeaderboard('class'); } catch (error) { contentDiv.innerHTML = `<div class="text-red-500">Could not load leaderboards.</div>`; }
         }
 
 

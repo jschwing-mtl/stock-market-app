@@ -27,7 +27,7 @@ export default async function handler(req, res) {
         const { action, payload, token } = req.body;
         let userData;
 
-        const protectedActions = ['getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'getQuotes', 'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 'getLeaderboards'];
+        const protectedActions = ['getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'getQuotes', 'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 'getLeaderboards', 'checkAndAwardAchievements'];
         
         if (protectedActions.includes(action)) {
             if (!token) throw new Error('Authentication token is required.');
@@ -57,6 +57,7 @@ export default async function handler(req, res) {
             case 'setCachedNews': await db.collection('newsCache').updateOne({ headline: payload.headline }, { $set: { simplifiedText: payload.simplifiedText } }, { upsert: true }); responseData = { success: true }; break;
             case 'getPortfolioAnalysis': responseData = await getPortfolioAnalysis(userData.username, payload.portfolioSummary); break;
             case 'getLeaderboards': responseData = await getLeaderboards(db.collection('users'), userData); break;
+            case 'checkAndAwardAchievements': responseData = await checkAndAwardAchievements(db, userData.userId); break;
             default: throw new Error(`Unknown action: ${action}`);
         }
         
@@ -77,17 +78,15 @@ async function registerUser(collection, { username, password }) {
     
     const hashedPassword = await bcrypt.hash(password, 10);
     const role = 'teacher';
-    await collection.insertOne({ username, hashedPassword, role, cash: 0, stocks: [], teacherId: null });
+    await collection.insertOne({ username, hashedPassword, role, cash: 0, stocks: [], achievements: [], teacherId: null });
     return { success: true };
 }
 
 async function loginUser(collection, { username, password }) {
     const user = await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } });
     if (!user) throw new Error('Invalid credentials.');
-
     const isMatch = await bcrypt.compare(password, user.hashedPassword);
     if (!isMatch) throw new Error('Invalid credentials.');
-
     const token = jwt.sign({ userId: user._id, username: user.username, role: user.role }, process.env.JWT_SECRET, { expiresIn: '12h' });
     return { token, userData: { userId: user._id, username: user.username, role: user.role } };
 }
@@ -96,49 +95,23 @@ async function loginUser(collection, { username, password }) {
 async function addStudent(collection, { username, password, startingCash, teacherId }) {
     if (await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } })) throw new Error('Username already exists.');
     const hashedPassword = await bcrypt.hash(password, 10);
-    const { insertedId } = await collection.insertOne({ username, hashedPassword, role: 'student', cash: startingCash || 100000, stocks: [], teacherId: new ObjectId(teacherId) });
+    const { insertedId } = await collection.insertOne({ username, hashedPassword, role: 'student', cash: startingCash || 100000, stocks: [], achievements: [], teacherId: new ObjectId(teacherId) });
     return { _id: insertedId, username, cash: startingCash || 100000 };
 }
 
-async function getStudentRoster(collection, teacherId) {
-    return await collection.find({ teacherId: new ObjectId(teacherId) }).project({ hashedPassword: 0 }).toArray();
-}
-
-async function removeStudent(collection, studentId, teacherId) {
-    const result = await collection.deleteOne({ _id: new ObjectId(studentId), teacherId: new ObjectId(teacherId) });
-    if (result.deletedCount === 0) throw new Error('Student not found or not under your roster.');
-    return { success: true };
-}
-
-async function updateStudentCash(collection, studentId, amount, teacherId) {
-    const result = await collection.updateOne({ _id: new ObjectId(studentId), teacherId: new ObjectId(teacherId) }, { $inc: { cash: amount } });
-    if (result.matchedCount === 0) throw new Error('Student not found or not under your roster.');
-    return { success: true };
-}
-
-async function updateTeacherCash(collection, teacherId, amount) {
-    const result = await collection.updateOne({ _id: new ObjectId(teacherId), role: 'teacher' }, { $inc: { cash: amount } });
-    if (result.matchedCount === 0) throw new Error('Teacher not found.');
-    const updatedUser = await collection.findOne({ _id: new ObjectId(teacherId) });
-    return { newCashBalance: updatedUser.cash };
-}
-
+async function getStudentRoster(collection, teacherId) { return await collection.find({ teacherId: new ObjectId(teacherId) }).project({ hashedPassword: 0 }).toArray(); }
+async function removeStudent(collection, studentId, teacherId) { const result = await collection.deleteOne({ _id: new ObjectId(studentId), teacherId: new ObjectId(teacherId) }); if (result.deletedCount === 0) throw new Error('Student not found or not under your roster.'); return { success: true }; }
+async function updateStudentCash(collection, studentId, amount, teacherId) { const result = await collection.updateOne({ _id: new ObjectId(studentId), teacherId: new ObjectId(teacherId) }, { $inc: { cash: amount } }); if (result.matchedCount === 0) throw new Error('Student not found or not under your roster.'); return { success: true }; }
+async function updateTeacherCash(collection, teacherId, amount) { const result = await collection.updateOne({ _id: new ObjectId(teacherId), role: 'teacher' }, { $inc: { cash: amount } }); if (result.matchedCount === 0) throw new Error('Teacher not found.'); const updatedUser = await collection.findOne({ _id: new ObjectId(teacherId) }); return { newCashBalance: updatedUser.cash }; }
 async function updateStudentCredentials(collection, studentId, teacherId, newUsername, newPassword) {
     const updateQuery = {};
     if (newUsername) {
-        // Check if new username already exists
         const existing = await collection.findOne({ username: { $regex: new RegExp(`^${newUsername}$`, 'i') } });
-        if (existing && !existing._id.equals(new ObjectId(studentId))) {
-            throw new Error("Username is already taken.");
-        }
+        if (existing && !existing._id.equals(new ObjectId(studentId))) throw new Error("Username is already taken.");
         updateQuery.username = newUsername;
     }
-    if (newPassword) {
-        updateQuery.hashedPassword = await bcrypt.hash(newPassword, 10);
-    }
-    if (Object.keys(updateQuery).length === 0) {
-        throw new Error("No changes were provided.");
-    }
+    if (newPassword) updateQuery.hashedPassword = await bcrypt.hash(newPassword, 10);
+    if (Object.keys(updateQuery).length === 0) throw new Error("No changes were provided.");
     const result = await collection.updateOne({ _id: new ObjectId(studentId), teacherId: new ObjectId(teacherId) }, { $set: updateQuery });
     if (result.matchedCount === 0) throw new Error('Student not found or not under your roster.');
     return { success: true };
@@ -146,7 +119,7 @@ async function updateStudentCredentials(collection, studentId, teacherId, newUse
 
 // --- PORTFOLIO & TRADING ---
 async function getPortfolio(collection, userId) {
-    const user = await collection.findOne({ _id: new ObjectId(userId) }, { projection: { cash: 1, stocks: 1 } });
+    const user = await collection.findOne({ _id: new ObjectId(userId) }, { projection: { cash: 1, stocks: 1, achievements: 1 } });
     if (!user) throw new Error('User not found.');
     return user;
 }
@@ -154,8 +127,10 @@ async function getPortfolio(collection, userId) {
 async function executeTrade(collection, userId, { type, symbol, quantity, price }) {
     const user = await collection.findOne({ _id: new ObjectId(userId) });
     if (!user) throw new Error('User not found.');
-    let { cash, stocks } = user;
+    let { cash, stocks, achievements } = user;
     stocks = stocks || [];
+    achievements = achievements || [];
+
     if (type === 'buy') {
         if (quantity * price > cash) throw new Error('Not enough cash.');
         cash -= quantity * price;
@@ -169,58 +144,74 @@ async function executeTrade(collection, userId, { type, symbol, quantity, price 
     } else if (type === 'sell') {
         const stock = stocks.find(s => s.symbol === symbol);
         if (!stock || stock.shares < quantity) throw new Error('Not enough shares to sell.');
+        if (price > stock.purchasePrice && !achievements.includes('PROFIT_MAKER')) achievements.push('PROFIT_MAKER');
         cash += quantity * price;
         stock.shares -= quantity;
         if (stock.shares === 0) stocks = stocks.filter(s => s.symbol !== symbol);
     } else {
         throw new Error('Invalid trade type.');
     }
-    await collection.updateOne({ _id: new ObjectId(userId) }, { $set: { cash, stocks } });
+    
+    if (!achievements.includes('FIRST_TRADE')) achievements.push('FIRST_TRADE');
+    await collection.updateOne({ _id: new ObjectId(userId) }, { $set: { cash, stocks, achievements } });
     const newPortfolio = await getPortfolio(collection, userId);
     return { success: true, newPortfolio };
 }
 
-// --- LEADERBOARD ---
+// --- LEADERBOARD & ACHIEVEMENTS ---
 async function getLeaderboards(usersCollection, currentUser) {
     const allUsers = await usersCollection.find({}, { projection: { username: 1, cash: 1, stocks: 1, teacherId: 1, role: 1 } }).toArray();
-    
     const allSymbols = [...new Set(allUsers.flatMap(u => u.stocks ? u.stocks.map(s => s.symbol) : []))];
-
     let quotes = {};
-    if (allSymbols.length > 0) {
-        quotes = await getQuotes(allSymbols);
-    }
+    if (allSymbols.length > 0) quotes = await getQuotes(allSymbols);
 
     const rankedUsers = allUsers.map(user => {
         let stockValue = 0;
-        if (user.stocks) {
-            user.stocks.forEach(stock => {
-                const currentPrice = quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice;
-                stockValue += stock.shares * currentPrice;
-            });
-        }
-        return {
-            ...user,
-            totalValue: user.cash + stockValue
-        };
+        if (user.stocks) user.stocks.forEach(stock => { stockValue += stock.shares * (quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice); });
+        return { ...user, totalValue: user.cash + stockValue };
     }).sort((a, b) => b.totalValue - a.totalValue);
 
     const global = rankedUsers;
-    
     let classLeaderboard = [];
     if (currentUser.role === 'teacher') {
         const teacherId = new ObjectId(currentUser.userId);
         classLeaderboard = rankedUsers.filter(user => user._id.equals(teacherId) || (user.teacherId && user.teacherId.equals(teacherId)));
     } else {
         const student = allUsers.find(u => u._id.equals(new ObjectId(currentUser.userId)));
-        if (student && student.teacherId) {
-             classLeaderboard = rankedUsers.filter(user => (user.teacherId && user.teacherId.equals(student.teacherId)) || user._id.equals(student.teacherId));
-        } else {
-            classLeaderboard = rankedUsers.filter(user => user._id.equals(new ObjectId(currentUser.userId)));
-        }
+        if (student && student.teacherId) classLeaderboard = rankedUsers.filter(user => (user.teacherId && user.teacherId.equals(student.teacherId)) || user._id.equals(student.teacherId));
+        else classLeaderboard = rankedUsers.filter(user => user._id.equals(new ObjectId(currentUser.userId)));
+    }
+    return { global, class: classLeaderboard };
+}
+
+async function checkAndAwardAchievements(db, userId) {
+    const user = await db.collection('users').findOne({ _id: new ObjectId(userId) });
+    if (!user) return { newAchievements: [] };
+    let { achievements, stocks, cash } = user;
+    achievements = achievements || [];
+
+    // Patient Investor
+    const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+    if (!achievements.includes('PATIENT_INVESTOR') && stocks.some(s => s.purchaseDate < thirtyDaysAgo)) achievements.push('PATIENT_INVESTOR');
+
+    // Market Master
+    let totalValue = cash;
+    const allSymbols = stocks.map(s => s.symbol);
+    if (allSymbols.length > 0) {
+        const quotes = await getQuotes(allSymbols);
+        stocks.forEach(stock => { totalValue += stock.shares * (quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice); });
+    }
+    if (!achievements.includes('MARKET_MASTER') && totalValue >= 125000) achievements.push('MARKET_MASTER');
+    
+    // Diversified Investor
+    if (!achievements.includes('DIVERSIFIED_INVESTOR') && stocks.length >= 3) {
+        const profiles = await Promise.all(stocks.map(s => fmpApiCall(`profile/${s.symbol}`)));
+        const industries = new Set(profiles.map(p => p[0].industry));
+        if (industries.size >= 3) achievements.push('DIVERSIFIED_INVESTOR');
     }
     
-    return { global, class: classLeaderboard };
+    await db.collection('users').updateOne({ _id: user._id }, { $set: { achievements } });
+    return { newAchievements: achievements };
 }
 
 // --- FMP DATA PROXY ---
@@ -236,90 +227,35 @@ async function fmpApiCall(endpoint, params = {}) {
     return data;
 }
 
-async function getQuotes(symbols) {
-    const data = await fmpApiCall(`quote/${symbols.join(',')}`);
-    const quotes = {};
-    data.forEach(q => { quotes[q.symbol] = { c: q.price }; });
-    return quotes;
-}
-
+async function getQuotes(symbols) { const data = await fmpApiCall(`quote/${symbols.join(',')}`); const quotes = {}; data.forEach(q => { quotes[q.symbol] = { c: q.price }; }); return quotes; }
 async function getCompanyNews(cacheCollection, symbols) {
     const data = await fmpApiCall(`stock_news`, { tickers: symbols.join(','), limit: 10 });
     let allNews = data || [];
     const headlines = allNews.map(n => n.title);
     const cachedItems = await cacheCollection.find({ headline: { $in: headlines } }).toArray();
     const cacheMap = new Map(cachedItems.map(item => [item.headline, item.simplifiedText]));
-    allNews.forEach(newsItem => {
-        if (cacheMap.has(newsItem.title)) newsItem.simplifiedText = cacheMap.get(newsItem.title);
-        newsItem.headline = newsItem.title;
-        newsItem.summary = newsItem.text;
-        newsItem.datetime = new Date(newsItem.publishedDate).getTime() / 1000;
-        newsItem.id = newsItem.url;
-    });
+    allNews.forEach(newsItem => { if (cacheMap.has(newsItem.title)) newsItem.simplifiedText = cacheMap.get(newsItem.title); newsItem.headline = newsItem.title; newsItem.summary = newsItem.text; newsItem.datetime = new Date(newsItem.publishedDate).getTime() / 1000; newsItem.id = newsItem.url; });
     return allNews;
 }
-
-async function getChartData(symbol) {
-    const data = await fmpApiCall(`historical-price-full/${symbol}`, { serietype: 'line' });
-    if (!data.historical) throw new Error("No chart data available.");
-    const historical = data.historical.reverse();
-    return { c: historical.map(d => d.close), t: historical.map(d => new Date(d.date).getTime() / 1000), s: 'ok' };
-}
+async function getChartData(symbol) { const data = await fmpApiCall(`historical-price-full/${symbol}`, { serietype: 'line' }); if (!data.historical) throw new Error("No chart data available."); const historical = data.historical.reverse(); return { c: historical.map(d => d.close), t: historical.map(d => new Date(d.date).getTime() / 1000), s: 'ok' }; }
 
 // --- AI-POWERED FUNCTIONS (OPENAI) ---
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
 async function intelligentSearch(query) {
-    const completion = await openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
-        messages: [
-            { role: 'system', content: "You are an expert financial assistant. A 4th-grade student is searching for a stock. Based on their query, identify the most likely single stock ticker symbol they are looking for. The stock must be on a major US exchange. Your response MUST be only the ticker symbol and nothing else." },
-            { role: 'user', content: `Query: "${query}"` }
-        ],
-        temperature: 0,
-        max_tokens: 10,
-    });
+    const completion = await openai.chat.completions.create({ model: 'gpt-3.5-turbo', messages: [{ role: 'system', content: "You are an expert financial assistant. A 4th-grade student is searching for a stock. Based on their query, identify the most likely single stock ticker symbol they are looking for. The stock must be on a major US exchange. Your response MUST be only the ticker symbol and nothing else." }, { role: 'user', content: `Query: "${query}"` }], temperature: 0, max_tokens: 10, });
     const symbol = completion.choices[0].message.content.trim().toUpperCase().replace(/[^A-Z]/g, '');
     if (!symbol) return [];
     const data = await fmpApiCall('search', { query: symbol, limit: 1, exchange: 'NASDAQ,NYSE' });
     return (data || []).map(r => ({ symbol: r.symbol, description: r.name }));
 }
-
-
 async function getCompanyExplanation(cacheCollection, companyName, symbol) {
     const cached = await cacheCollection.findOne({ symbol });
     if (cached) return { explanation: cached.explanation };
-    const completion = await openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
-        messages: [
-            { role: 'system', content: "You are a financial analyst explaining a company to a 4th grader. Your tone is simple, direct, and informative. First, state what goods/services the company sells. Second, make a brief, neutral statement about its recent performance (e.g., 'the stock has grown' or 'has faced challenges'). Finally, state a potential reason to consider investing and a potential risk, without giving direct advice. Output only the explanation." },
-            { role: 'user', content: `Explain "${companyName}" (${symbol}).` }
-        ],
-    });
+    const completion = await openai.chat.completions.create({ model: 'gpt-3.5-turbo', messages: [{ role: 'system', content: "You are a financial analyst explaining a company to a 4th grader. Your tone is simple, direct, and informative. First, state what goods/services the company sells. Second, make a brief, neutral statement about its recent performance (e.g., 'the stock has grown' or 'has faced challenges'). Finally, state a potential reason to consider investing and a potential risk, without giving direct advice. Output only the explanation." }, { role: 'user', content: `Explain "${companyName}" (${symbol}).` }], });
     const explanation = completion.choices[0].message.content.trim();
     await cacheCollection.updateOne({ symbol }, { $set: { explanation } }, { upsert: true });
     return { explanation };
 }
-
-async function simplifyNews(headline, summary) {
-    const completion = await openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
-        messages: [
-            { role: 'system', content: "You are an expert at simplifying financial news for a 4th grader. Rewrite the following news summary in simple, easy-to-understand language. Explain what it means for the company. Output only the simplified text." },
-            { role: 'user', content: `Headline: ${headline}\nSummary: ${summary}` }
-        ],
-    });
-    return { simplifiedText: completion.choices[0].message.content.trim() };
-}
-
-async function getPortfolioAnalysis(username, portfolioSummary) {
-    const completion = await openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
-        messages: [
-            { role: 'system', content: "You are a friendly financial coach for kids. Look at the student's portfolio and provide simple, positive feedback. Explain concepts like diversification and performance in easy terms. DO NOT give financial advice. Keep it to 2-3 short paragraphs. Address the student by name." },
-            { role: 'user', content: `Here is ${username}'s portfolio summary: ${JSON.stringify(portfolioSummary)}. Please provide a simple analysis.` }
-        ],
-    });
-    return { analysis: completion.choices[0].message.content.trim() };
-}
+async function simplifyNews(headline, summary) { const completion = await openai.chat.completions.create({ model: 'gpt-3.5-turbo', messages: [{ role: 'system', content: "You are an expert at simplifying financial news for a 4th grader. Rewrite the following news summary in simple, easy-to-understand language. Explain what it means for the company. Output only the simplified text." }, { role: 'user', content: `Headline: ${headline}\nSummary: ${summary}` }], }); return { simplifiedText: completion.choices[0].message.content.trim() }; }
+async function getPortfolioAnalysis(username, portfolioSummary) { const completion = await openai.chat.completions.create({ model: 'gpt-3.5-turbo', messages: [{ role: 'system', content: "You are a friendly financial coach for kids. Look at the student's portfolio and provide simple, positive feedback. Explain concepts like diversification and performance in easy terms. DO NOT give financial advice. Keep it to 2-3 short paragraphs. Address the student by name." }, { role: 'user', content: `Here is ${username}'s portfolio summary: ${JSON.stringify(portfolioSummary)}. Please provide a simple analysis.` }], }); return { analysis: completion.choices[0].message.content.trim() }; }
 

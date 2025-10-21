@@ -90,7 +90,7 @@ async function loginUser(collection, { username, password }) {
     const isMatch = await bcrypt.compare(password, user.hashedPassword);
     if (!isMatch) throw new Error('Invalid credentials.');
     const token = jwt.sign({ userId: user._id, username: user.username, role: user.role }, process.env.JWT_SECRET, { expiresIn: '12h' });
-    return { token, userData: { userId: user._id, username: user.username, role: user.role } };
+    return { token, userData: { userId: user._id.toString(), username: user.username, role: user.role } };
 }
 
 // --- TEACHER & ROSTER ---
@@ -101,7 +101,9 @@ async function addStudent(collection, { username, password, startingCash, teache
     return { _id: insertedId, username, cash: startingCash || 100000, isTradingPaused: false };
 }
 
-async function getStudentRoster(collection, teacherId) { return await collection.find({ teacherId: new ObjectId(teacherId) }).project({ hashedPassword: 0 }).toArray(); }
+async function getStudentRoster(collection, teacherId) { 
+    return await collection.find({ teacherId: new ObjectId(teacherId) }).project({ hashedPassword: 0 }).toArray(); 
+}
 async function removeStudent(collection, studentId, teacherId) { const result = await collection.deleteOne({ _id: new ObjectId(studentId), teacherId: new ObjectId(teacherId) }); if (result.deletedCount === 0) throw new Error('Student not found or not under your roster.'); return { success: true }; }
 async function updateStudentCash(collection, studentId, amount, teacherId) { const result = await collection.updateOne({ _id: new ObjectId(studentId), teacherId: new ObjectId(teacherId) }, { $inc: { cash: amount } }); if (result.matchedCount === 0) throw new Error('Student not found or not under your roster.'); return { success: true }; }
 async function updateTeacherCash(collection, teacherId, amount) { const result = await collection.updateOne({ _id: new ObjectId(teacherId), role: 'teacher' }, { $inc: { cash: amount } }); if (result.matchedCount === 0) throw new Error('Teacher not found.'); const updatedUser = await collection.findOne({ _id: new ObjectId(teacherId) }); return { newCashBalance: updatedUser.cash }; }

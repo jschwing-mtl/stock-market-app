@@ -58,7 +58,7 @@ export default async function handler(req, res) {
             case 'getPortfolioAnalysis': responseData = await getPortfolioAnalysis(userData.username, payload.portfolioSummary); break;
             case 'getLeaderboards': responseData = await getLeaderboards(db.collection('users'), userData); break;
             case 'checkAndAwardAchievements': responseData = await checkAndAwardAchievements(db, userData.userId); break;
-            case 'getStockIndustries': responseData = await getStockIndustries(payload.symbols); break; // This was the missing action
+            case 'getStockIndustries': responseData = await getStockIndustries(payload.symbols); break; 
             default: throw new Error(`Unknown action: ${action}`);
         }
         
@@ -101,11 +101,30 @@ async function addStudent(collection, { username, password, startingCash, teache
 }
 
 async function getStudentRoster(collection, teacherId) { 
-    return await collection.find({ teacherId: teacherId }).project({ hashedPassword: 0 }).toArray(); 
+    // THE FIX: Check for both string and ObjectId to be backward-compatible.
+    return await collection.find({ 
+        $or: [
+            { teacherId: teacherId }, 
+            { teacherId: new ObjectId(teacherId) }
+        ] 
+    }).project({ hashedPassword: 0 }).toArray(); 
 }
-async function removeStudent(collection, studentId, teacherId) { const result = await collection.deleteOne({ _id: new ObjectId(studentId), teacherId: teacherId }); if (result.deletedCount === 0) throw new Error('Student not found or not under your roster.'); return { success: true }; }
-async function updateStudentCash(collection, studentId, amount, teacherId) { const result = await collection.updateOne({ _id: new ObjectId(studentId), teacherId: teacherId }, { $inc: { cash: amount } }); if (result.matchedCount === 0) throw new Error('Student not found or not under your roster.'); return { success: true }; }
-async function updateTeacherCash(collection, teacherId, amount) { const result = await collection.updateOne({ _id: new ObjectId(teacherId), role: 'teacher' }, { $inc: { cash: amount } }); if (result.matchedCount === 0) throw new Error('Teacher not found.'); const updatedUser = await collection.findOne({ _id: new ObjectId(teacherId) }); return { newCashBalance: updatedUser.cash }; }
+async function removeStudent(collection, studentId, teacherId) { 
+    const result = await collection.deleteOne({ _id: new ObjectId(studentId), $or: [{ teacherId: teacherId }, { teacherId: new ObjectId(teacherId) }] }); 
+    if (result.deletedCount === 0) throw new Error('Student not found or not under your roster.'); 
+    return { success: true }; 
+}
+async function updateStudentCash(collection, studentId, amount, teacherId) { 
+    const result = await collection.updateOne({ _id: new ObjectId(studentId), $or: [{ teacherId: teacherId }, { teacherId: new ObjectId(teacherId) }] }, { $inc: { cash: amount } }); 
+    if (result.matchedCount === 0) throw new Error('Student not found or not under your roster.'); 
+    return { success: true }; 
+}
+async function updateTeacherCash(collection, teacherId, amount) { 
+    const result = await collection.updateOne({ _id: new ObjectId(teacherId), role: 'teacher' }, { $inc: { cash: amount } }); 
+    if (result.matchedCount === 0) throw new Error('Teacher not found.'); 
+    const updatedUser = await collection.findOne({ _id: new ObjectId(teacherId) }); 
+    return { newCashBalance: updatedUser.cash }; 
+}
 async function updateStudentCredentials(collection, studentId, teacherId, newUsername, newPassword) {
     const updateQuery = {};
     if (newUsername) {
@@ -115,7 +134,7 @@ async function updateStudentCredentials(collection, studentId, teacherId, newUse
     }
     if (newPassword) updateQuery.hashedPassword = await bcrypt.hash(newPassword, 10);
     if (Object.keys(updateQuery).length === 0) throw new Error("No changes were provided.");
-    const result = await collection.updateOne({ _id: new ObjectId(studentId), teacherId: teacherId }, { $set: updateQuery });
+    const result = await collection.updateOne({ _id: new ObjectId(studentId), $or: [{ teacherId: teacherId }, { teacherId: new ObjectId(teacherId) }] }, { $set: updateQuery });
     if (result.matchedCount === 0) throw new Error('Student not found or not under your roster.');
     return { success: true };
 }
@@ -133,7 +152,6 @@ async function executeTrade(collection, userId, { type, symbol, quantity, price 
     let { cash, stocks, achievements } = user;
     stocks = stocks || [];
     achievements = achievements || [];
-
     if (type === 'buy') {
         if (quantity * price > cash) throw new Error('Not enough cash.');
         cash -= quantity * price;
@@ -154,7 +172,6 @@ async function executeTrade(collection, userId, { type, symbol, quantity, price 
     } else {
         throw new Error('Invalid trade type.');
     }
-    
     if (!achievements.includes('FIRST_TRADE')) achievements.push('FIRST_TRADE');
     await collection.updateOne({ _id: new ObjectId(userId) }, { $set: { cash, stocks, achievements } });
     const newPortfolio = await getPortfolio(collection, userId);
@@ -167,24 +184,23 @@ async function getLeaderboards(usersCollection, currentUser) {
     const allSymbols = [...new Set(allUsers.flatMap(u => u.stocks ? u.stocks.map(s => s.symbol) : []))];
     let quotes = {};
     if (allSymbols.length > 0) quotes = await getQuotes(allSymbols);
-
     const rankedUsers = allUsers.map(user => {
         let stockValue = 0;
         if (user.stocks) user.stocks.forEach(stock => { stockValue += stock.shares * (quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice); });
         return { ...user, totalValue: user.cash + stockValue };
     }).sort((a, b) => b.totalValue - a.totalValue);
-
     const global = rankedUsers;
     let classLeaderboard = [];
     if (currentUser.role === 'teacher') {
         const teacherId = currentUser.userId;
-        classLeaderboard = rankedUsers.filter(user => user._id.toString() === teacherId || (user.teacherId && user.teacherId === teacherId));
+        classLeaderboard = rankedUsers.filter(user => user._id.toString() === teacherId || (user.teacherId && (user.teacherId.toString() === teacherId)));
     } else {
-        const student = allUsers.find(u => u._id.equals(new ObjectId(currentUser.userId)));
+        const student = allUsers.find(u => u._id.toString() === currentUser.userId);
         if (student && student.teacherId) {
-             classLeaderboard = rankedUsers.filter(user => (user.teacherId && user.teacherId === student.teacherId) || user._id.toString() === student.teacherId);
+            const teacherIdStr = student.teacherId.toString();
+            classLeaderboard = rankedUsers.filter(user => (user.teacherId && user.teacherId.toString() === teacherIdStr) || user._id.toString() === teacherIdStr);
         } else {
-            classLeaderboard = rankedUsers.filter(user => user._id.equals(new ObjectId(currentUser.userId)));
+            classLeaderboard = rankedUsers.filter(user => user._id.toString() === currentUser.userId);
         }
     }
     return { global, class: classLeaderboard };
@@ -195,10 +211,8 @@ async function checkAndAwardAchievements(db, userId) {
     if (!user) return { newAchievements: [] };
     let { achievements, stocks, cash } = user;
     achievements = achievements || [];
-
     const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
     if (!achievements.includes('PATIENT_INVESTOR') && stocks.some(s => s.purchaseDate < thirtyDaysAgo)) achievements.push('PATIENT_INVESTOR');
-
     let totalValue = cash;
     const allSymbols = stocks.map(s => s.symbol);
     if (allSymbols.length > 0) {
@@ -206,13 +220,11 @@ async function checkAndAwardAchievements(db, userId) {
         stocks.forEach(stock => { totalValue += stock.shares * (quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice); });
     }
     if (!achievements.includes('MARKET_MASTER') && totalValue >= 125000) achievements.push('MARKET_MASTER');
-    
     if (!achievements.includes('DIVERSIFIED_INVESTOR') && stocks.length >= 3) {
         const industryData = await getStockIndustries(allSymbols);
         const industries = new Set(Object.values(industryData));
         if (industries.size >= 3) achievements.push('DIVERSIFIED_INVESTOR');
     }
-    
     await db.collection('users').updateOne({ _id: user._id }, { $set: { achievements } });
     return { newAchievements: achievements };
 }
@@ -229,7 +241,6 @@ async function fmpApiCall(endpoint, params = {}) {
     if (data["Error Message"]) throw new Error(data["Error Message"]);
     return data;
 }
-
 async function getQuotes(symbols) { const data = await fmpApiCall(`quote/${symbols.join(',')}`); const quotes = {}; data.forEach(q => { quotes[q.symbol] = { c: q.price }; }); return quotes; }
 async function getCompanyNews(cacheCollection, symbols) {
     const data = await fmpApiCall(`stock_news`, { tickers: symbols.join(','), limit: 10 });
@@ -241,16 +252,10 @@ async function getCompanyNews(cacheCollection, symbols) {
     return allNews;
 }
 async function getChartData(symbol) { const data = await fmpApiCall(`historical-price-full/${symbol}`, { serietype: 'line' }); if (!data.historical) throw new Error("No chart data available."); const historical = data.historical.reverse(); return { c: historical.map(d => d.close), t: historical.map(d => new Date(d.date).getTime() / 1000), s: 'ok' }; }
-
-// This is the function that was missing
 async function getStockIndustries(symbols) {
     const profiles = await Promise.all(symbols.map(s => fmpApiCall(`profile/${s}`)));
     const industries = {};
-    profiles.flat().forEach(p => {
-        if (p && p.symbol) {
-            industries[p.symbol] = p.industry || 'Other';
-        }
-    });
+    profiles.flat().forEach(p => { if (p && p.symbol) { industries[p.symbol] = p.industry || 'Other'; } });
     return industries;
 }
 

@@ -89,7 +89,14 @@ async function loginUser(collection, { username, password }) {
     if (!user) throw new Error('Invalid credentials.');
     const isMatch = await bcrypt.compare(password, user.hashedPassword);
     if (!isMatch) throw new Error('Invalid credentials.');
-    const token = jwt.sign({ userId: user._id, username: user.username, role: user.role }, process.env.JWT_SECRET, { expiresIn: '12h' });
+    
+    // THE FIX: Convert the user's ObjectId to a string before creating the token.
+    const token = jwt.sign(
+        { userId: user._id.toString(), username: user.username, role: user.role }, 
+        process.env.JWT_SECRET, 
+        { expiresIn: '12h' }
+    );
+    
     return { token, userData: { userId: user._id.toString(), username: user.username, role: user.role } };
 }
 

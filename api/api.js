@@ -27,7 +27,7 @@ export default async function handler(req, res) {
         const { action, payload, token } = req.body;
         let userData;
 
-        const protectedActions = ['getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'toggleTradingStatus', 'getQuotes', 'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 'getLeaderboards', 'checkAndAwardAchievements', 'getStockIndustries'];
+        const protectedActions = ['getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'getQuotes', 'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 'getLeaderboards', 'checkAndAwardAchievements', 'getStockIndustries'];
         
         if (protectedActions.includes(action)) {
             if (!token) throw new Error('Authentication token is required.');
@@ -46,7 +46,6 @@ export default async function handler(req, res) {
             case 'updateStudentCash': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await updateStudentCash(db.collection('users'), payload.studentId, payload.amount, userData.userId); break;
             case 'updateTeacherCash': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await updateTeacherCash(db.collection('users'), userData.userId, payload.amount); break;
             case 'updateStudentCredentials': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await updateStudentCredentials(db.collection('users'), payload.studentId, userData.userId, payload.newUsername, payload.newPassword); break;
-            case 'toggleTradingStatus': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await toggleTradingStatus(db.collection('users'), payload.studentId, payload.isPaused, userData.userId); break;
             case 'getPortfolio': responseData = await getPortfolio(db.collection('users'), userData.userId); break;
             case 'executeTrade': responseData = await executeTrade(db.collection('users'), userData.userId, payload); break;
             case 'getQuotes': responseData = await getQuotes(payload.symbols); break;
@@ -89,14 +88,7 @@ async function loginUser(collection, { username, password }) {
     if (!user) throw new Error('Invalid credentials.');
     const isMatch = await bcrypt.compare(password, user.hashedPassword);
     if (!isMatch) throw new Error('Invalid credentials.');
-    
-    // THE FIX: Convert the user's ObjectId to a string before creating the token.
-    const token = jwt.sign(
-        { userId: user._id.toString(), username: user.username, role: user.role }, 
-        process.env.JWT_SECRET, 
-        { expiresIn: '12h' }
-    );
-    
+    const token = jwt.sign({ userId: user._id.toString(), username: user.username, role: user.role }, process.env.JWT_SECRET, { expiresIn: '12h' });
     return { token, userData: { userId: user._id.toString(), username: user.username, role: user.role } };
 }
 
@@ -104,16 +96,33 @@ async function loginUser(collection, { username, password }) {
 async function addStudent(collection, { username, password, startingCash, teacherId }) {
     if (await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } })) throw new Error('Username already exists.');
     const hashedPassword = await bcrypt.hash(password, 10);
-    const { insertedId } = await collection.insertOne({ username, hashedPassword, role: 'student', cash: startingCash || 100000, stocks: [], achievements: [], isTradingPaused: false, teacherId: new ObjectId(teacherId) });
-    return { _id: insertedId, username, cash: startingCash || 100000, isTradingPaused: false };
+    const { insertedId } = await collection.insertOne({ username, hashedPassword, role: 'student', cash: startingCash || 100000, stocks: [], achievements: [], teacherId: teacherId });
+    return { _id: insertedId, username, cash: startingCash || 100000 };
 }
 
 async function getStudentRoster(collection, teacherId) { 
-    return await collection.find({ teacherId: new ObjectId(teacherId) }).project({ hashedPassword: 0 }).toArray(); 
+    return await collection.find({ teacherId: teacherId }).project({ hashedPassword: 0 }).toArray(); 
 }
-async function removeStudent(collection, studentId, teacherId) { const result = await collection.deleteOne({ _id: new ObjectId(studentId), teacherId: new ObjectId(teacherId) }); if (result.deletedCount === 0) throw new Error('Student not found or not under your roster.'); return { success: true }; }
-async function updateStudentCash(collection, studentId, amount, teacherId) { const result = await collection.updateOne({ _id: new ObjectId(studentId), teacherId: new ObjectId(teacherId) }, { $inc: { cash: amount } }); if (result.matchedCount === 0) throw new Error('Student not found or not under your roster.'); return { success: true }; }
-async function updateTeacherCash(collection, teacherId, amount) { const result = await collection.updateOne({ _id: new ObjectId(teacherId), role: 'teacher' }, { $inc: { cash: amount } }); if (result.matchedCount === 0) throw new Error('Teacher not found.'); const updatedUser = await collection.findOne({ _id: new ObjectId(teacherId) }); return { newCashBalance: updatedUser.cash }; }
+
+async function removeStudent(collection, studentId, teacherId) { 
+    const result = await collection.deleteOne({ _id: new ObjectId(studentId), teacherId: teacherId }); 
+    if (result.deletedCount === 0) throw new Error('Student not found or not under your roster.'); 
+    return { success: true }; 
+}
+
+async function updateStudentCash(collection, studentId, amount, teacherId) { 
+    const result = await collection.updateOne({ _id: new ObjectId(studentId), teacherId: teacherId }, { $inc: { cash: amount } }); 
+    if (result.matchedCount === 0) throw new Error('Student not found or not under your roster.'); 
+    return { success: true }; 
+}
+
+async function updateTeacherCash(collection, teacherId, amount) { 
+    const result = await collection.updateOne({ _id: new ObjectId(teacherId), role: 'teacher' }, { $inc: { cash: amount } }); 
+    if (result.matchedCount === 0) throw new Error('Teacher not found.'); 
+    const updatedUser = await collection.findOne({ _id: new ObjectId(teacherId) }); 
+    return { newCashBalance: updatedUser.cash }; 
+}
+
 async function updateStudentCredentials(collection, studentId, teacherId, newUsername, newPassword) {
     const updateQuery = {};
     if (newUsername) {
@@ -121,29 +130,20 @@ async function updateStudentCredentials(collection, studentId, teacherId, newUse
         if (existing && !existing._id.equals(new ObjectId(studentId))) throw new Error("Username is already taken.");
         updateQuery.username = newUsername;
     }
-    if (newPassword) updateQuery.hashedPassword = await bcrypt.hash(newPassword, 10);
-    if (Object.keys(updateQuery).length === 0) throw new Error("No changes were provided.");
-    const result = await collection.updateOne({ _id: new ObjectId(studentId), teacherId: new ObjectId(teacherId) }, { $set: updateQuery });
+    if (newPassword) {
+        updateQuery.hashedPassword = await bcrypt.hash(newPassword, 10);
+    }
+    if (Object.keys(updateQuery).length === 0) {
+        throw new Error("No changes were provided.");
+    }
+    const result = await collection.updateOne({ _id: new ObjectId(studentId), teacherId: teacherId }, { $set: updateQuery });
     if (result.matchedCount === 0) throw new Error('Student not found or not under your roster.');
     return { success: true };
 }
 
-async function toggleTradingStatus(collection, studentId, isPaused, teacherId) {
-    const teacherObjectId = new ObjectId(teacherId);
-    let filter;
-    if (studentId) { // Individual student
-        filter = { _id: new ObjectId(studentId), teacherId: teacherObjectId };
-    } else { // All students for the teacher
-        filter = { teacherId: teacherObjectId };
-    }
-    await collection.updateMany(filter, { $set: { isTradingPaused: isPaused } });
-    const updatedStudents = await collection.find(filter).project({_id: 1, isTradingPaused: 1}).toArray();
-    return { success: true, updatedStudents };
-}
-
 // --- PORTFOLIO & TRADING ---
 async function getPortfolio(collection, userId) {
-    const user = await collection.findOne({ _id: new ObjectId(userId) }, { projection: { cash: 1, stocks: 1, achievements: 1, isTradingPaused: 1 } });
+    const user = await collection.findOne({ _id: new ObjectId(userId) }, { projection: { cash: 1, stocks: 1, achievements: 1 } });
     if (!user) throw new Error('User not found.');
     return user;
 }
@@ -151,8 +151,6 @@ async function getPortfolio(collection, userId) {
 async function executeTrade(collection, userId, { type, symbol, quantity, price }) {
     const user = await collection.findOne({ _id: new ObjectId(userId) });
     if (!user) throw new Error('User not found.');
-    if (user.isTradingPaused) throw new Error("Trading is currently paused by your teacher.");
-    
     let { cash, stocks, achievements } = user;
     stocks = stocks || [];
     achievements = achievements || [];
@@ -200,12 +198,15 @@ async function getLeaderboards(usersCollection, currentUser) {
     const global = rankedUsers;
     let classLeaderboard = [];
     if (currentUser.role === 'teacher') {
-        const teacherId = new ObjectId(currentUser.userId);
-        classLeaderboard = rankedUsers.filter(user => user._id.equals(teacherId) || (user.teacherId && user.teacherId.equals(teacherId)));
+        const teacherId = currentUser.userId;
+        classLeaderboard = rankedUsers.filter(user => user._id.toString() === teacherId || (user.teacherId && user.teacherId === teacherId));
     } else {
         const student = allUsers.find(u => u._id.equals(new ObjectId(currentUser.userId)));
-        if (student && student.teacherId) classLeaderboard = rankedUsers.filter(user => (user.teacherId && user.teacherId.equals(student.teacherId)) || user._id.equals(student.teacherId));
-        else classLeaderboard = rankedUsers.filter(user => user._id.equals(new ObjectId(currentUser.userId)));
+        if (student && student.teacherId) {
+             classLeaderboard = rankedUsers.filter(user => (user.teacherId && user.teacherId === student.teacherId) || user._id.toString() === student.teacherId);
+        } else {
+            classLeaderboard = rankedUsers.filter(user => user._id.equals(new ObjectId(currentUser.userId)));
+        }
     }
     return { global, class: classLeaderboard };
 }

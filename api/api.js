@@ -27,7 +27,7 @@ export default async function handler(req, res) {
         const { action, payload, token } = req.body;
         let userData;
 
-        const protectedActions = ['getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'getQuotes', 'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 'getLeaderboards', 'checkAndAwardAchievements', 'getStockIndustries'];
+        const protectedActions = ['getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'getQuotes', 'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 'getLeaderboards', 'checkAndAwardAchievements'];
         
         if (protectedActions.includes(action)) {
             if (!token) throw new Error('Authentication token is required.');
@@ -58,7 +58,6 @@ export default async function handler(req, res) {
             case 'getPortfolioAnalysis': responseData = await getPortfolioAnalysis(userData.username, payload.portfolioSummary); break;
             case 'getLeaderboards': responseData = await getLeaderboards(db.collection('users'), userData); break;
             case 'checkAndAwardAchievements': responseData = await checkAndAwardAchievements(db, userData.userId); break;
-            case 'getStockIndustries': responseData = await getStockIndustries(payload.symbols); break;
             default: throw new Error(`Unknown action: ${action}`);
         }
         
@@ -88,41 +87,22 @@ async function loginUser(collection, { username, password }) {
     if (!user) throw new Error('Invalid credentials.');
     const isMatch = await bcrypt.compare(password, user.hashedPassword);
     if (!isMatch) throw new Error('Invalid credentials.');
-    const token = jwt.sign({ userId: user._id.toString(), username: user.username, role: user.role }, process.env.JWT_SECRET, { expiresIn: '12h' });
-    return { token, userData: { userId: user._id.toString(), username: user.username, role: user.role } };
+    const token = jwt.sign({ userId: user._id, username: user.username, role: user.role }, process.env.JWT_SECRET, { expiresIn: '12h' });
+    return { token, userData: { userId: user._id, username: user.username, role: user.role } };
 }
 
 // --- TEACHER & ROSTER ---
 async function addStudent(collection, { username, password, startingCash, teacherId }) {
     if (await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } })) throw new Error('Username already exists.');
     const hashedPassword = await bcrypt.hash(password, 10);
-    const { insertedId } = await collection.insertOne({ username, hashedPassword, role: 'student', cash: startingCash || 100000, stocks: [], achievements: [], teacherId: teacherId });
+    const { insertedId } = await collection.insertOne({ username, hashedPassword, role: 'student', cash: startingCash || 100000, stocks: [], achievements: [], teacherId: new ObjectId(teacherId) });
     return { _id: insertedId, username, cash: startingCash || 100000 };
 }
 
-async function getStudentRoster(collection, teacherId) { 
-    return await collection.find({ teacherId: teacherId }).project({ hashedPassword: 0 }).toArray(); 
-}
-
-async function removeStudent(collection, studentId, teacherId) { 
-    const result = await collection.deleteOne({ _id: new ObjectId(studentId), teacherId: teacherId }); 
-    if (result.deletedCount === 0) throw new Error('Student not found or not under your roster.'); 
-    return { success: true }; 
-}
-
-async function updateStudentCash(collection, studentId, amount, teacherId) { 
-    const result = await collection.updateOne({ _id: new ObjectId(studentId), teacherId: teacherId }, { $inc: { cash: amount } }); 
-    if (result.matchedCount === 0) throw new Error('Student not found or not under your roster.'); 
-    return { success: true }; 
-}
-
-async function updateTeacherCash(collection, teacherId, amount) { 
-    const result = await collection.updateOne({ _id: new ObjectId(teacherId), role: 'teacher' }, { $inc: { cash: amount } }); 
-    if (result.matchedCount === 0) throw new Error('Teacher not found.'); 
-    const updatedUser = await collection.findOne({ _id: new ObjectId(teacherId) }); 
-    return { newCashBalance: updatedUser.cash }; 
-}
-
+async function getStudentRoster(collection, teacherId) { return await collection.find({ teacherId: new ObjectId(teacherId) }).project({ hashedPassword: 0 }).toArray(); }
+async function removeStudent(collection, studentId, teacherId) { const result = await collection.deleteOne({ _id: new ObjectId(studentId), teacherId: new ObjectId(teacherId) }); if (result.deletedCount === 0) throw new Error('Student not found or not under your roster.'); return { success: true }; }
+async function updateStudentCash(collection, studentId, amount, teacherId) { const result = await collection.updateOne({ _id: new ObjectId(studentId), teacherId: new ObjectId(teacherId) }, { $inc: { cash: amount } }); if (result.matchedCount === 0) throw new Error('Student not found or not under your roster.'); return { success: true }; }
+async function updateTeacherCash(collection, teacherId, amount) { const result = await collection.updateOne({ _id: new ObjectId(teacherId), role: 'teacher' }, { $inc: { cash: amount } }); if (result.matchedCount === 0) throw new Error('Teacher not found.'); const updatedUser = await collection.findOne({ _id: new ObjectId(teacherId) }); return { newCashBalance: updatedUser.cash }; }
 async function updateStudentCredentials(collection, studentId, teacherId, newUsername, newPassword) {
     const updateQuery = {};
     if (newUsername) {
@@ -130,13 +110,9 @@ async function updateStudentCredentials(collection, studentId, teacherId, newUse
         if (existing && !existing._id.equals(new ObjectId(studentId))) throw new Error("Username is already taken.");
         updateQuery.username = newUsername;
     }
-    if (newPassword) {
-        updateQuery.hashedPassword = await bcrypt.hash(newPassword, 10);
-    }
-    if (Object.keys(updateQuery).length === 0) {
-        throw new Error("No changes were provided.");
-    }
-    const result = await collection.updateOne({ _id: new ObjectId(studentId), teacherId: teacherId }, { $set: updateQuery });
+    if (newPassword) updateQuery.hashedPassword = await bcrypt.hash(newPassword, 10);
+    if (Object.keys(updateQuery).length === 0) throw new Error("No changes were provided.");
+    const result = await collection.updateOne({ _id: new ObjectId(studentId), teacherId: new ObjectId(teacherId) }, { $set: updateQuery });
     if (result.matchedCount === 0) throw new Error('Student not found or not under your roster.');
     return { success: true };
 }
@@ -198,15 +174,12 @@ async function getLeaderboards(usersCollection, currentUser) {
     const global = rankedUsers;
     let classLeaderboard = [];
     if (currentUser.role === 'teacher') {
-        const teacherId = currentUser.userId;
-        classLeaderboard = rankedUsers.filter(user => user._id.toString() === teacherId || (user.teacherId && user.teacherId === teacherId));
+        const teacherId = new ObjectId(currentUser.userId);
+        classLeaderboard = rankedUsers.filter(user => user._id.equals(teacherId) || (user.teacherId && user.teacherId.equals(teacherId)));
     } else {
         const student = allUsers.find(u => u._id.equals(new ObjectId(currentUser.userId)));
-        if (student && student.teacherId) {
-             classLeaderboard = rankedUsers.filter(user => (user.teacherId && user.teacherId === student.teacherId) || user._id.toString() === student.teacherId);
-        } else {
-            classLeaderboard = rankedUsers.filter(user => user._id.equals(new ObjectId(currentUser.userId)));
-        }
+        if (student && student.teacherId) classLeaderboard = rankedUsers.filter(user => (user.teacherId && user.teacherId.equals(student.teacherId)) || user._id.equals(student.teacherId));
+        else classLeaderboard = rankedUsers.filter(user => user._id.equals(new ObjectId(currentUser.userId)));
     }
     return { global, class: classLeaderboard };
 }
@@ -217,9 +190,11 @@ async function checkAndAwardAchievements(db, userId) {
     let { achievements, stocks, cash } = user;
     achievements = achievements || [];
 
+    // Patient Investor
     const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
     if (!achievements.includes('PATIENT_INVESTOR') && stocks.some(s => s.purchaseDate < thirtyDaysAgo)) achievements.push('PATIENT_INVESTOR');
 
+    // Market Master
     let totalValue = cash;
     const allSymbols = stocks.map(s => s.symbol);
     if (allSymbols.length > 0) {
@@ -228,9 +203,10 @@ async function checkAndAwardAchievements(db, userId) {
     }
     if (!achievements.includes('MARKET_MASTER') && totalValue >= 125000) achievements.push('MARKET_MASTER');
     
+    // Diversified Investor
     if (!achievements.includes('DIVERSIFIED_INVESTOR') && stocks.length >= 3) {
-        const industryData = await getStockIndustries(allSymbols);
-        const industries = new Set(Object.values(industryData));
+        const profiles = await Promise.all(stocks.map(s => fmpApiCall(`profile/${s.symbol}`)));
+        const industries = new Set(profiles.map(p => p[0].industry));
         if (industries.size >= 3) achievements.push('DIVERSIFIED_INVESTOR');
     }
     
@@ -262,17 +238,6 @@ async function getCompanyNews(cacheCollection, symbols) {
     return allNews;
 }
 async function getChartData(symbol) { const data = await fmpApiCall(`historical-price-full/${symbol}`, { serietype: 'line' }); if (!data.historical) throw new Error("No chart data available."); const historical = data.historical.reverse(); return { c: historical.map(d => d.close), t: historical.map(d => new Date(d.date).getTime() / 1000), s: 'ok' }; }
-async function getStockIndustries(symbols) {
-    const profiles = await Promise.all(symbols.map(s => fmpApiCall(`profile/${s}`)));
-    const industries = {};
-    profiles.flat().forEach(p => {
-        if (p && p.symbol) {
-            industries[p.symbol] = p.industry || 'Other';
-        }
-    });
-    return industries;
-}
-
 
 // --- AI-POWERED FUNCTIONS (OPENAI) ---
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -293,4 +258,3 @@ async function getCompanyExplanation(cacheCollection, companyName, symbol) {
 }
 async function simplifyNews(headline, summary) { const completion = await openai.chat.completions.create({ model: 'gpt-3.5-turbo', messages: [{ role: 'system', content: "You are an expert at simplifying financial news for a 4th grader. Rewrite the following news summary in simple, easy-to-understand language. Explain what it means for the company. Output only the simplified text." }, { role: 'user', content: `Headline: ${headline}\nSummary: ${summary}` }], }); return { simplifiedText: completion.choices[0].message.content.trim() }; }
 async function getPortfolioAnalysis(username, portfolioSummary) { const completion = await openai.chat.completions.create({ model: 'gpt-3.5-turbo', messages: [{ role: 'system', content: "You are a friendly financial coach for kids. Look at the student's portfolio and provide simple, positive feedback. Explain concepts like diversification and performance in easy terms. DO NOT give financial advice. Keep it to 2-3 short paragraphs. Address the student by name." }, { role: 'user', content: `Here is ${username}'s portfolio summary: ${JSON.stringify(portfolioSummary)}. Please provide a simple analysis.` }], }); return { analysis: completion.choices[0].message.content.trim() }; }
-

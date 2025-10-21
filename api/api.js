@@ -27,7 +27,7 @@ export default async function handler(req, res) {
         const { action, payload, token } = req.body;
         let userData;
 
-        const protectedActions = ['getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'getQuotes', 'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 'getLeaderboards', 'checkAndAwardAchievements'];
+        const protectedActions = ['getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'getQuotes', 'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 'getLeaderboards', 'checkAndAwardAchievements', 'getStockIndustries'];
         
         if (protectedActions.includes(action)) {
             if (!token) throw new Error('Authentication token is required.');
@@ -58,6 +58,7 @@ export default async function handler(req, res) {
             case 'getPortfolioAnalysis': responseData = await getPortfolioAnalysis(userData.username, payload.portfolioSummary); break;
             case 'getLeaderboards': responseData = await getLeaderboards(db.collection('users'), userData); break;
             case 'checkAndAwardAchievements': responseData = await checkAndAwardAchievements(db, userData.userId); break;
+            case 'getStockIndustries': responseData = await getStockIndustries(payload.symbols); break;
             default: throw new Error(`Unknown action: ${action}`);
         }
         
@@ -190,11 +191,9 @@ async function checkAndAwardAchievements(db, userId) {
     let { achievements, stocks, cash } = user;
     achievements = achievements || [];
 
-    // Patient Investor
     const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
     if (!achievements.includes('PATIENT_INVESTOR') && stocks.some(s => s.purchaseDate < thirtyDaysAgo)) achievements.push('PATIENT_INVESTOR');
 
-    // Market Master
     let totalValue = cash;
     const allSymbols = stocks.map(s => s.symbol);
     if (allSymbols.length > 0) {
@@ -203,10 +202,9 @@ async function checkAndAwardAchievements(db, userId) {
     }
     if (!achievements.includes('MARKET_MASTER') && totalValue >= 125000) achievements.push('MARKET_MASTER');
     
-    // Diversified Investor
     if (!achievements.includes('DIVERSIFIED_INVESTOR') && stocks.length >= 3) {
-        const profiles = await Promise.all(stocks.map(s => fmpApiCall(`profile/${s.symbol}`)));
-        const industries = new Set(profiles.map(p => p[0].industry));
+        const industryData = await getStockIndustries(allSymbols);
+        const industries = new Set(Object.values(industryData));
         if (industries.size >= 3) achievements.push('DIVERSIFIED_INVESTOR');
     }
     
@@ -238,6 +236,17 @@ async function getCompanyNews(cacheCollection, symbols) {
     return allNews;
 }
 async function getChartData(symbol) { const data = await fmpApiCall(`historical-price-full/${symbol}`, { serietype: 'line' }); if (!data.historical) throw new Error("No chart data available."); const historical = data.historical.reverse(); return { c: historical.map(d => d.close), t: historical.map(d => new Date(d.date).getTime() / 1000), s: 'ok' }; }
+async function getStockIndustries(symbols) {
+    const profiles = await Promise.all(symbols.map(s => fmpApiCall(`profile/${s}`)));
+    const industries = {};
+    profiles.flat().forEach(p => {
+        if (p && p.symbol) {
+            industries[p.symbol] = p.industry || 'Other';
+        }
+    });
+    return industries;
+}
+
 
 // --- AI-POWERED FUNCTIONS (OPENAI) ---
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });

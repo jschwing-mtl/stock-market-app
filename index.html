@@ -207,19 +207,26 @@
         function renderAchievements() {
             const achievementsSection = document.getElementById('achievements-section');
             achievementsSection.innerHTML = `<h2 class="text-2xl font-bold mb-4">My Achievements</h2>`;
-            const earnedAchievements = state.portfolio.achievements;
-            if (!earnedAchievements || earnedAchievements.length === 0) {
-                achievementsSection.innerHTML += `<div class="bg-white p-4 rounded-lg shadow-sm text-center text-gray-500">You haven't earned any badges yet. Start trading!</div>`;
-                return;
-            }
+            const earnedAchievements = new Set(state.portfolio.achievements || []);
+            
             const badgeGrid = document.createElement('div');
             badgeGrid.className = 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4';
-            earnedAchievements.forEach(badgeId => {
+            
+            for (const badgeId in allAchievements) {
                 const achievement = allAchievements[badgeId];
-                if (achievement) {
-                    badgeGrid.innerHTML += `<div class="relative has-tooltip flex flex-col items-center p-4 bg-white rounded-lg shadow-sm border border-gray-200"><div class="text-yellow-500">${achievement.svg}</div><p class="mt-2 text-sm font-semibold text-center">${achievement.name}</p><div class="tooltip absolute z-10 bottom-full mb-2 w-48 p-2 text-xs text-white bg-gray-800 rounded-md shadow-lg text-center">${achievement.description}</div></div>`;
-                }
-            });
+                const isEarned = earnedAchievements.has(badgeId);
+                const colorClass = isEarned ? 'text-yellow-500' : 'text-gray-400 opacity-50';
+
+                badgeGrid.innerHTML += `
+                    <div class="relative has-tooltip flex flex-col items-center p-4 bg-white rounded-lg shadow-sm border border-gray-200">
+                        <div class="${colorClass}">${achievement.svg}</div>
+                        <p class="mt-2 text-sm font-semibold text-center">${achievement.name}</p>
+                        <div class="tooltip absolute z-10 bottom-full mb-2 w-48 p-2 text-xs text-white bg-gray-800 rounded-md shadow-lg text-center">
+                            ${achievement.description}
+                        </div>
+                    </div>
+                `;
+            }
             achievementsSection.appendChild(badgeGrid);
         }
 

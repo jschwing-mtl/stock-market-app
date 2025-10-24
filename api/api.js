@@ -101,13 +101,7 @@ async function addStudent(collection, { username, password, startingCash, teache
 }
 
 async function getStudentRoster(collection, teacherId) { 
-    // THE FIX: Check for both string and ObjectId to be backward-compatible.
-    return await collection.find({ 
-        $or: [
-            { teacherId: teacherId }, 
-            { teacherId: new ObjectId(teacherId) }
-        ] 
-    }).project({ hashedPassword: 0 }).toArray(); 
+    return await collection.find({ $or: [{ teacherId: teacherId }, { teacherId: new ObjectId(teacherId) }] }).project({ hashedPassword: 0 }).toArray(); 
 }
 async function removeStudent(collection, studentId, teacherId) { 
     const result = await collection.deleteOne({ _id: new ObjectId(studentId), $or: [{ teacherId: teacherId }, { teacherId: new ObjectId(teacherId) }] }); 
@@ -261,13 +255,67 @@ async function getStockIndustries(symbols) {
 
 // --- AI-POWERED FUNCTIONS (OPENAI) ---
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
 async function intelligentSearch(query) {
-    const completion = await openai.chat.completions.create({ model: 'gpt-3.5-turbo', messages: [{ role: 'system', content: "You are an expert financial assistant. A 4th-grade student is searching for a stock. Based on their query, identify the most likely single stock ticker symbol they are looking for. The stock must be on a major US exchange. Your response MUST be only the ticker symbol and nothing else." }, { role: 'user', content: `Query: "${query}"` }], temperature: 0, max_tokens: 10, });
-    const symbol = completion.choices[0].message.content.trim().toUpperCase().replace(/[^A-Z]/g, '');
-    if (!symbol) return [];
-    const data = await fmpApiCall('search', { query: symbol, limit: 1, exchange: 'NASDAQ,NYSE' });
-    return (data || []).map(r => ({ symbol: r.symbol, description: r.name }));
+    // 1. Direct FMP Search
+    let fmpResults = [];
+    try {
+        fmpResults = await fmpApiCall('search', { query, limit: 5, exchange: 'NASDAQ,NYSE' });
+    } catch (error) {
+        console.error("FMP search failed:", error);
+        // Don't throw, continue to AI search
+    }
+
+    // Prepare results in the desired format
+    let combinedResults = (fmpResults || []).map(r => ({ symbol: r.symbol, description: r.name }));
+
+    // 2. AI Search if FMP results are limited or query is conceptual
+    // Let's assume conceptual if query is multiple words or FMP returned < 2 results
+    if ((fmpResults.length < 2 || query.includes(' ')) && process.env.OPENAI_API_KEY) {
+        try {
+            const completion = await openai.chat.completions.create({
+                model: 'gpt-3.5-turbo',
+                messages: [
+                    { role: 'system', content: "You are a financial assistant. Based on the user's query (product, industry, concept, company name), list up to 5 relevant stock ticker symbols on major US exchanges, separated by commas. ONLY output the comma-separated symbols." },
+                    { role: 'user', content: `Query: "${query}"` }
+                ],
+                temperature: 0.1,
+                max_tokens: 50,
+            });
+
+            const aiSymbols = completion.choices[0].message.content.trim().toUpperCase().split(',').map(s => s.trim()).filter(Boolean);
+            
+            if (aiSymbols.length > 0) {
+                // Fetch details for AI symbols from FMP
+                const aiDetails = await Promise.all(
+                    aiSymbols.map(symbol => fmpApiCall('search', { query: symbol, limit: 1, exchange: 'NASDAQ,NYSE' }))
+                );
+                
+                // Flatten, filter, and format AI results
+                const aiFormattedResults = aiDetails
+                    .flat() // Flatten the array of arrays
+                    .filter(r => r && aiSymbols.includes(r.symbol)) // Ensure we only get the symbols AI suggested
+                    .map(r => ({ symbol: r.symbol, description: r.name }));
+
+                // Combine and deduplicate
+                const uniqueSymbols = new Set(combinedResults.map(r => r.symbol));
+                aiFormattedResults.forEach(r => {
+                    if (!uniqueSymbols.has(r.symbol)) {
+                        combinedResults.push(r);
+                        uniqueSymbols.add(r.symbol);
+                    }
+                });
+            }
+        } catch (aiError) {
+            console.error("OpenAI search enhancement failed:", aiError);
+            // Proceed with FMP results only
+        }
+    }
+
+    // Limit total results
+    return combinedResults.slice(0, 10);
 }
+
 async function getCompanyExplanation(cacheCollection, companyName, symbol) {
     const cached = await cacheCollection.findOne({ symbol });
     if (cached) return { explanation: cached.explanation };

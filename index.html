@@ -87,6 +87,7 @@
             currentPage: 'login',
             userData: null,
             portfolio: { cash: 0, stocks: [], achievements: [] },
+            portfolioSort: { key: 'symbol', order: 'asc' }, // New state for sorting
             searchResults: [],
             studentRoster: [],
             currentChart: { instance: null, data: null },
@@ -166,6 +167,9 @@
                     state.portfolio.stocks.forEach(stock => {
                         stock.currentPrice = quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice;
                         stock.industry = industryData[stock.symbol] || 'Other';
+                        // Pre-calculate values for sorting
+                        stock.totalValue = stock.shares * stock.currentPrice;
+                        stock.gainLoss = stock.totalValue - (stock.shares * stock.purchasePrice);
                     });
                 }
                 
@@ -185,18 +189,66 @@
         function renderPortfolioView() {
             const contentDiv = document.getElementById('portfolio-content');
             const isTeacher = state.userData.role === 'teacher';
+            
+            // --- Sorting Logic ---
+            const { key, order } = state.portfolioSort;
+            const sortedStocks = [...state.portfolio.stocks].sort((a, b) => {
+                let valA, valB;
+                if (key === 'symbol') { valA = a.symbol; valB = b.symbol; }
+                else if (key === 'shares') { valA = a.shares; valB = b.shares; }
+                else if (key === 'purchasePrice') { valA = a.purchasePrice; valB = b.purchasePrice; }
+                else if (key === 'currentPrice') { valA = a.currentPrice; valB = b.currentPrice; }
+                else if (key === 'totalValue') { valA = a.totalValue; valB = b.totalValue; }
+                else if (key === 'gainLoss') { valA = a.gainLoss; valB = b.gainLoss; }
+                else { return 0; }
+                if (valA < valB) return order === 'asc' ? -1 : 1;
+                if (valA > valB) return order === 'asc' ? 1 : -1;
+                return 0;
+            });
+            // --- End Sorting Logic ---
+
+            const sortArrow = (colKey) => {
+                if (state.portfolioSort.key !== colKey) return '';
+                return state.portfolioSort.order === 'asc' ? ' ▲' : ' ▼';
+            };
+
             let totalValue = state.portfolio.cash;
-            state.portfolio.stocks.forEach(s => totalValue += s.shares * s.currentPrice);
+            sortedStocks.forEach(s => totalValue += s.totalValue); // Use pre-calculated totalValue
+            
             const teacherCashControls = isTeacher ? `<div class="mt-2 flex justify-center space-x-2"><button class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-md hover:bg-green-200" onclick="openAdjustTeacherCashModal('add')">Add Cash</button><button class="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-md hover:bg-red-200" onclick="openAdjustTeacherCashModal('remove')">Remove Cash</button></div>` : '';
-            const stockRows = state.portfolio.stocks.map(stock => {
-                const currentValue = stock.shares * stock.currentPrice, purchaseValue = stock.shares * stock.purchasePrice, gainLoss = currentValue - purchaseValue, gainLossPercent = purchaseValue !== 0 ? (gainLoss / purchaseValue) * 100 : 0;
+            
+            const stockRows = sortedStocks.map(stock => {
+                const { symbol, shares, purchasePrice, currentPrice, totalValue, gainLoss } = stock;
+                const purchaseValue = shares * purchasePrice;
+                const gainLossPercent = purchaseValue !== 0 ? (gainLoss / purchaseValue) * 100 : 0;
                 const gainLossColor = gainLoss >= 0 ? 'text-green-600' : 'text-red-600';
-                return `<tr class="border-b"><td class="py-3 px-4 font-medium">${stock.symbol}</td><td class="py-3 px-4">${stock.shares}</td><td class="py-3 px-4">$${stock.purchasePrice.toFixed(2)}</td><td class="py-3 px-4">$${stock.currentPrice.toFixed(2)}</td><td class="py-3 px-4">$${currentValue.toFixed(2)}</td><td class="py-3 px-4 ${gainLossColor}">$${gainLoss.toFixed(2)} (${gainLossPercent.toFixed(2)}%)</td><td class="py-3 px-4"><button class="text-indigo-600 hover:underline" onclick="showChart('${stock.symbol}')">View Chart</button></td></tr>`;
+                return `<tr class="border-b"><td class="py-3 px-4 font-medium">${symbol}</td><td class="py-3 px-4">${shares}</td><td class="py-3 px-4">$${purchasePrice.toFixed(2)}</td><td class="py-3 px-4">$${currentPrice.toFixed(2)}</td><td class="py-3 px-4">$${totalValue.toFixed(2)}</td><td class="py-3 px-4 ${gainLossColor}">$${gainLoss.toFixed(2)} (${gainLossPercent.toFixed(2)}%)</td><td class="py-3 px-4"><button class="text-indigo-600 hover:underline" onclick="showChart('${symbol}')">View Chart</button></td></tr>`;
             }).join('');
+
             const donutChartCanvas = (state.portfolio.stocks.length > 0) ? `<div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500 mb-2">Diversification</h3><div style="position: relative; height:120px"><canvas id="portfolioDonutChart"></canvas></div></div>` : `<div class="bg-gray-100 p-4 rounded-lg flex items-center justify-center"><p class="text-sm text-gray-500">Buy stocks to see your diversification.</p></div>`;
-            contentDiv.innerHTML = `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">My Portfolio</h2><button id="ai-analysis-btn" class="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 text-sm">✨ Get AI Portfolio Analysis</button></div><div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center mb-6"><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Total Value</h3><p class="text-2xl font-semibold">$${totalValue.toFixed(2)}</p></div><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Cash Balance</h3><p id="cash-balance-display" class="text-2xl font-semibold">$${state.portfolio.cash.toFixed(2)}</p>${teacherCashControls}</div>${donutChartCanvas}</div><div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead class="bg-gray-50"><tr><th class="py-3 px-4 font-semibold">Symbol</th><th class="py-3 px-4 font-semibold">Shares</th><th class="py-3 px-4 font-semibold">Avg. Purchase Price</th><th class="py-3 px-4 font-semibold">Current Price</th><th class="py-3 px-4 font-semibold">Total Value</th><th class="py-3 px-4 font-semibold">Gain/Loss</th><th class="py-3 px-4 font-semibold">Actions</th></tr></thead><tbody>${stockRows.length > 0 ? stockRows : `<tr><td colspan="7" class="text-center py-4">You don't own any stocks yet. Go to the Trade page to buy some!</td></tr>`}</tbody></table></div></div>`;
+            
+            contentDiv.innerHTML = `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">My Portfolio</h2><button id="ai-analysis-btn" class="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 text-sm">✨ Get AI Portfolio Analysis</button></div><div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center mb-6"><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Total Value</h3><p class="text-2xl font-semibold">$${totalValue.toFixed(2)}</p></div><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Cash Balance</h3><p id="cash-balance-display" class="text-2xl font-semibold">$${state.portfolio.cash.toFixed(2)}</p>${teacherCashControls}</div>${donutChartCanvas}</div><div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead class="bg-gray-50"><tr>
+                <th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('symbol')">Symbol${sortArrow('symbol')}</th>
+                <th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('shares')">Shares${sortArrow('shares')}</th>
+                <th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('purchasePrice')">Avg. Purchase Price${sortArrow('purchasePrice')}</th>
+                <th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('currentPrice')">Current Price${sortArrow('currentPrice')}</th>
+                <th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('totalValue')">Total Value${sortArrow('totalValue')}</th>
+                <th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('gainLoss')">Gain/Loss${sortArrow('gainLoss')}</th>
+                <th class="py-3 px-4 font-semibold">Actions</th>
+            </tr></thead><tbody>${stockRows.length > 0 ? stockRows : `<tr><td colspan="7" class="text-center py-4">You don't own any stocks yet. Go to the Trade page to buy some!</td></tr>`}</tbody></table></div></div>`;
             document.getElementById('ai-analysis-btn').addEventListener('click', getPortfolioAnalysis);
             if (state.portfolio.stocks.length > 0) renderDonutChart();
+        }
+
+        // New sorting function
+        function sortPortfolio(key) {
+            const { portfolioSort } = state;
+            let newOrder = 'asc';
+            if (portfolioSort.key === key && portfolioSort.order === 'asc') {
+                newOrder = 'desc';
+            }
+            state.portfolioSort = { key, order: newOrder };
+            renderPortfolioView(); // Re-render the view with new sorting
         }
 
         function renderDonutChart() {
@@ -548,3 +600,4 @@
     </script>
 </body>
 </html>
+

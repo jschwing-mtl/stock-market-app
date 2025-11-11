@@ -465,7 +465,11 @@
         }
 
         function openCreateCompetitionModal() {
-            const now = new Date().toISOString().substring(0, 16); // Format for datetime-local
+            const now = new Date();
+            const nowString = now.toISOString().substring(0, 16);
+            now.setDate(now.getDate() + 7);
+            const nextWeekString = now.toISOString().substring(0, 16);
+
             const modalContent = `
                 <h3 class="text-xl font-bold mb-4">Create New Competition</h3>
                 <form id="create-competition-form" class="space-y-4">
@@ -475,11 +479,11 @@
                     </div>
                     <div>
                         <label for="comp-start" class="block text-sm font-medium">Start Date & Time</label>
-                        <input type="datetime-local" id="comp-start" value="${now}" required class="mt-1 w-full border rounded-md px-3 py-2">
+                        <input type="datetime-local" id="comp-start" value="${nowString}" required class="mt-1 w-full border rounded-md px-3 py-2">
                     </div>
                     <div>
                         <label for="comp-end" class="block text-sm font-medium">End Date & Time</label>
-                        <input type="datetime-local" id="comp-end" value="${now}" required class="mt-1 w-full border rounded-md px-3 py-2">
+                        <input type="datetime-local" id="comp-end" value="${nextWeekString}" required class="mt-1 w-full border rounded-md px-3 py-2">
                     </div>
                     <button type="submit" class="w-full bg-green-600 text-white py-2 rounded-md">Create Competition</button>
                 </form>
@@ -524,7 +528,7 @@
 
         function logout() { localStorage.removeItem('sessionToken'); state.userData = null; navigateTo('login'); }
         async function init() { const token = localStorage.getItem('sessionToken'); if (token) { try { const data = await callApi('validateSession'); state.userData = data; navigateTo('portfolio'); } catch (error) { logout(); } } else { navigateTo('login'); } }
-        window.navigateTo = navigateTo; window.logout = logout; window.openTradeModal = openTradeModal; window.closeModal = closeModal; window.showChart = showChart; window.simplifyNews = simplifyNews; window.getCompanyExplanation = getCompanyExplanation; window.openAddStudentModal = openAddStudentModal; window.openAdjustCashModal = openAdjustCashModal; window.removeStudent = removeStudent; window.updateChart = updateChart; window.openAdjustTeacherCashModal = openAdjustTeacherCashModal; window.openEditStudentModal = openEditStudentModal; window.joinCompetition = joinCompetition;
+        window.navigateTo = navigateTo; window.logout = logout; window.openTradeModal = openTradeModal; window.closeModal = closeModal; window.showChart = showChart; window.simplifyNews = simplifyNews; window.getCompanyExplanation = getCompanyExplanation; window.openAddStudentModal = openAddStudentModal; window.openAdjustCashModal = openAdjustCashModal; window.removeStudent = removeStudent; window.updateChart = updateChart; window.openAdjustTeacherCashModal = openAdjustTeacherCashModal; window.openEditStudentModal = openEditStudentModal; window.joinCompetition = joinCompetition; window.openCreateCompetitionModal = openCreateCompetitionModal;
         init();
         function render() { App(); }
     </script>

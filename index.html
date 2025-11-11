@@ -161,7 +161,7 @@
                 if (distance < 0) {
                     clearInterval(state.countdownTimer);
                     banner.innerHTML = `<strong>${competition.name}</strong> has ended! Checking results...`;
-                    navigateTo('portfolio'); // Trigger a reload to show wrap-up
+                    navigateTo('portfolio');
                 } else {
                     const days = Math.floor(distance / (1000 * 60 * 60 * 24));
                     const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
@@ -179,30 +179,17 @@
                 const { classRank, globalRank, aiAnalysis } = wrapUpData;
                 const renderPodium = (title, ranks) => {
                     let html = `<div class="mb-4"><h3 class="text-xl font-semibold mb-2">${title}</h3><ul class="text-left space-y-1">`;
-                    ranks.slice(0, 3).forEach((user, i) => {
-                        const medal = ['🥇', '🥈', '🥉'][i];
-                        html += `<li class="p-2 rounded ${i === 0 ? 'bg-yellow-100' : ''}">${medal} ${i + 1}. ${user.username} - $${user.totalValue.toFixed(2)}</li>`;
-                    });
+                    ranks.slice(0, 3).forEach((user, i) => { const medal = ['🥇', '🥈', '🥉'][i]; html += `<li class="p-2 rounded ${i === 0 ? 'bg-yellow-100' : ''}">${medal} ${i + 1}. ${user.username} - $${user.totalValue.toFixed(2)}</li>`; });
                     html += `</ul></div>`;
                     return html;
                 };
-                document.getElementById('wrap-up-content').innerHTML = `
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        ${renderPodium('Class Leaderboard', classRank)}
-                        ${renderPodium('Global Leaderboard', globalRank)}
-                    </div>
-                    <div class="mt-6 text-left bg-gray-100 p-4 rounded-lg">
-                        <h4 class="font-semibold mb-2">✨ Your AI Insight</h4>
-                        <p class="text-sm">${aiAnalysis}</p>
-                    </div>
-                    <p class="mt-4 text-gray-700">Congratulations on a great competition! Your portfolio is now unlocked for regular trading.</p>
-                `;
+                document.getElementById('wrap-up-content').innerHTML = `<div class="grid grid-cols-1 md:grid-cols-2 gap-4">${renderPodium('Class Leaderboard', classRank)}${renderPodium('Global Leaderboard', globalRank)}</div><div class="mt-6 text-left bg-gray-100 p-4 rounded-lg"><h4 class="font-semibold mb-2">✨ Your AI Insight</h4><p class="text-sm">${aiAnalysis}</p></div><p class="mt-4 text-gray-700">Congratulations on a great competition! Your portfolio is now unlocked for regular trading.</p>`;
                 document.getElementById('dismiss-wrap-up').addEventListener('click', async () => {
                     await callApi('markCompetitionFinished');
                     state.portfolio.activeCompetition = null;
                     state.portfolio.isTradingPaused = false;
                     closeModal();
-                    navigateTo('portfolio'); // Refresh portfolio page
+                    navigateTo('portfolio');
                 });
             } catch (error) { document.getElementById('wrap-up-content').innerHTML = `<p class="text-red-500">Could not load results.</p>`; }
         }
@@ -227,11 +214,7 @@
                 state.portfolio.activeCompetition = portfolioData.activeCompetition || null;
                 state.portfolio.isTradingPaused = portfolioData.isTradingPaused || false;
                 state.portfolio.competitionEnded = portfolioData.competitionEnded || false;
-
-                if (state.portfolio.competitionEnded && !state.portfolio.isTradingPaused) {
-                    showWrapUpModal(state.portfolio.activeCompetition);
-                }
-
+                if (state.portfolio.competitionEnded && !state.portfolio.isTradingPaused) showWrapUpModal(state.portfolio.activeCompetition);
                 let symbols = state.portfolio.stocks.map(s => s.symbol);
                 if (symbols.length > 0) {
                     const [quotes, industryData] = await Promise.all([ callApi('getQuotes', { symbols }), callApi('getStockIndustries', { symbols }) ]);
@@ -434,9 +417,114 @@
             globalTab.addEventListener('click', () => { classTab.classList.remove('text-indigo-600', 'border-indigo-600'); classTab.classList.add('text-gray-500'); globalTab.classList.add('text-indigo-600', 'border-indigo-600'); renderLeaderboard('global'); });
             try { leaderboardData = await callApi('getLeaderboards'); renderLeaderboard('class'); } catch (error) { contentDiv.innerHTML = `<div class="text-red-500">Could not load leaderboards.</div>`; }
         }
+        
+        // --- COMPETITION LISTENERS ---
+        async function attachCompetitionListeners() {
+            if (state.userData.role === 'teacher') {
+                document.getElementById('create-competition-btn').addEventListener('click', openCreateCompetitionModal);
+            }
+            await renderCompetitionList();
+        }
+
+        async function renderCompetitionList() {
+            const listDiv = document.getElementById('competition-list');
+            listDiv.innerHTML = "Loading competitions...";
+            try {
+                const { competitions, userCompetitionId } = await callApi('getCompetitions');
+                if (competitions.length === 0) {
+                    listDiv.innerHTML = `<p class="text-center text-gray-500">No competitions have been created yet.</p>`;
+                    return;
+                }
+                
+                listDiv.innerHTML = competitions.map(comp => {
+                    const isJoined = userCompetitionId === comp._id;
+                    const isTeacher = state.userData.role === 'teacher';
+                    let buttonHtml = '';
+                    if (isTeacher) {
+                        buttonHtml = isJoined 
+                            ? `<span class="text-green-600 font-semibold">Joined</span>` 
+                            : `<button class="bg-indigo-600 text-white px-4 py-2 rounded-md text-sm hover:bg-indigo-700" onclick="joinCompetition('${comp._id}')">Join with Class</button>`;
+                    }
+                    
+                    return `
+                        <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex justify-between items-center">
+                            <div>
+                                <h3 class="text-lg font-semibold">${comp.name}</h3>
+                                <p class="text-sm text-gray-600">Starts: ${new Date(comp.startTime).toLocaleString()}</p>
+                                <p class="text-sm text-gray-600">Ends: ${new Date(comp.endTime).toLocaleString()}</p>
+                                <p class="text-xs text-gray-500">Created by: ${comp.creatorName}</p>
+                            </div>
+                            <div>${buttonHtml}</div>
+                        </div>
+                    `;
+                }).join('');
+
+            } catch (error) {
+                listDiv.innerHTML = `<p class="text-red-500">Could not load competitions.</p>`;
+            }
+        }
+
+        function openCreateCompetitionModal() {
+            const now = new Date().toISOString().substring(0, 16); // Format for datetime-local
+            const modalContent = `
+                <h3 class="text-xl font-bold mb-4">Create New Competition</h3>
+                <form id="create-competition-form" class="space-y-4">
+                    <div>
+                        <label for="comp-name" class="block text-sm font-medium">Competition Name</label>
+                        <input type="text" id="comp-name" required class="mt-1 w-full border rounded-md px-3 py-2">
+                    </div>
+                    <div>
+                        <label for="comp-start" class="block text-sm font-medium">Start Date & Time</label>
+                        <input type="datetime-local" id="comp-start" value="${now}" required class="mt-1 w-full border rounded-md px-3 py-2">
+                    </div>
+                    <div>
+                        <label for="comp-end" class="block text-sm font-medium">End Date & Time</label>
+                        <input type="datetime-local" id="comp-end" value="${now}" required class="mt-1 w-full border rounded-md px-3 py-2">
+                    </div>
+                    <button type="submit" class="w-full bg-green-600 text-white py-2 rounded-md">Create Competition</button>
+                </form>
+                <div id="modal-message" class="mt-4 text-center"></div>
+            `;
+            renderModal(modalContent);
+            
+            document.getElementById('create-competition-form').addEventListener('submit', async e => {
+                e.preventDefault();
+                const name = e.target.elements['comp-name'].value;
+                const startTime = new Date(e.target.elements['comp-start'].value).getTime();
+                const endTime = new Date(e.target.elements['comp-end'].value).getTime();
+                const msgDiv = document.getElementById('modal-message');
+
+                if (endTime <= startTime) {
+                    msgDiv.className = 'mt-4 text-center text-red-600';
+                    msgDiv.textContent = 'End time must be after the start time.';
+                    return;
+                }
+                
+                try {
+                    await callApi('createCompetition', { name, startTime, endTime });
+                    closeModal();
+                    renderCompetitionList();
+                } catch (error) {
+                    msgDiv.className = 'mt-4 text-center text-red-600';
+                    msgDiv.textContent = `Error: ${error.message}`;
+                }
+            });
+        }
+        
+        async function joinCompetition(competitionId) {
+            if (confirm('Are you sure you want to join this competition? This will enroll you and all of your current students.')) {
+                try {
+                    await callApi('joinCompetition', { competitionId });
+                    renderCompetitionList();
+                } catch (error) {
+                    alert(`Error: ${error.message}`);
+                }
+            }
+        }
+
         function logout() { localStorage.removeItem('sessionToken'); state.userData = null; navigateTo('login'); }
         async function init() { const token = localStorage.getItem('sessionToken'); if (token) { try { const data = await callApi('validateSession'); state.userData = data; navigateTo('portfolio'); } catch (error) { logout(); } } else { navigateTo('login'); } }
-        window.navigateTo = navigateTo; window.logout = logout; window.openTradeModal = openTradeModal; window.closeModal = closeModal; window.showChart = showChart; window.simplifyNews = simplifyNews; window.getCompanyExplanation = getCompanyExplanation; window.openAddStudentModal = openAddStudentModal; window.openAdjustCashModal = openAdjustCashModal; window.removeStudent = removeStudent; window.updateChart = updateChart; window.openAdjustTeacherCashModal = openAdjustTeacherCashModal; window.openEditStudentModal = openEditStudentModal;
+        window.navigateTo = navigateTo; window.logout = logout; window.openTradeModal = openTradeModal; window.closeModal = closeModal; window.showChart = showChart; window.simplifyNews = simplifyNews; window.getCompanyExplanation = getCompanyExplanation; window.openAddStudentModal = openAddStudentModal; window.openAdjustCashModal = openAdjustCashModal; window.removeStudent = removeStudent; window.updateChart = updateChart; window.openAdjustTeacherCashModal = openAdjustTeacherCashModal; window.openEditStudentModal = openEditStudentModal; window.joinCompetition = joinCompetition;
         init();
         function render() { App(); }
     </script>

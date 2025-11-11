@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/date-fns/1.30.1/date_fns.min.js"></script>
     <style>
         body { font-family: 'Inter', sans-serif; }
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -64,17 +65,12 @@
                 if (!response.ok) {
                     const errorBody = await response.text();
                     let errorMessage = errorBody;
-                    try {
-                        errorMessage = JSON.parse(errorBody).message || errorBody;
-                    } catch (e) {}
+                    try { errorMessage = JSON.parse(errorBody).message || errorBody; } catch (e) {}
                     throw new Error(`HTTP error! status: ${response.status} - ${errorMessage}`);
                 }
                 const result = await response.json();
-                if (result.data) {
-                    return result.data;
-                } else {
-                    throw new Error(result.message || 'An unknown error occurred.');
-                }
+                if (result.data) return result.data;
+                throw new Error(result.message || 'An unknown error occurred.');
             } catch (error) {
                 console.error('API Call Error:', action, error);
                 showMessage(`Error: ${error.message}`);
@@ -86,12 +82,13 @@
         const state = {
             currentPage: 'login',
             userData: null,
-            portfolio: { cash: 0, stocks: [], achievements: [] },
-            portfolioSort: { key: 'symbol', order: 'asc' }, // New state for sorting
+            portfolio: { cash: 0, stocks: [], achievements: [], isTradingPaused: false, activeCompetition: null },
+            portfolioSort: { key: 'symbol', order: 'asc' },
             searchResults: [],
             studentRoster: [],
             currentChart: { instance: null, data: null },
-            donutChart: null
+            donutChart: null,
+            countdownTimer: null
         };
 
         function navigateTo(page) {
@@ -103,12 +100,21 @@
         const App = () => {
             const appContainer = document.getElementById('app');
             appContainer.innerHTML = '';
+            
+            if (state.portfolio.isTradingPaused) {
+                appContainer.innerHTML += `<div class="bg-yellow-200 text-yellow-800 text-center p-2 rounded-md mb-4 font-semibold">Trading is currently paused.</div>`;
+            } else if (state.portfolio.activeCompetition && !state.portfolio.competitionEnded) {
+                 appContainer.innerHTML += `<div id="competition-banner" class="bg-blue-100 text-blue-800 text-center p-2 rounded-md mb-4 font-semibold"></div>`;
+                 startCountdownTimer(state.portfolio.activeCompetition.endTime);
+            }
+
             switch (state.currentPage) {
-                case 'login': appContainer.innerHTML = LoginScreen(); attachLoginListeners(); break;
-                case 'portfolio': appContainer.innerHTML = Navbar() + PortfolioScreen(); attachPortfolioListeners(); break;
-                case 'trade': appContainer.innerHTML = Navbar() + TradeScreen(); attachTradeListeners(); break;
-                case 'roster': appContainer.innerHTML = Navbar() + RosterScreen(); attachRosterListeners(); break;
-                case 'leaderboard': appContainer.innerHTML = Navbar() + LeaderboardScreen(); attachLeaderboardListeners(); break;
+                case 'login': appContainer.innerHTML += LoginScreen(); attachLoginListeners(); break;
+                case 'portfolio': appContainer.innerHTML += Navbar() + PortfolioScreen(); attachPortfolioListeners(); break;
+                case 'trade': appContainer.innerHTML += Navbar() + TradeScreen(); attachTradeListeners(); break;
+                case 'roster': appContainer.innerHTML += Navbar() + RosterScreen(); attachRosterListeners(); break;
+                case 'leaderboard': appContainer.innerHTML += Navbar() + LeaderboardScreen(); attachLeaderboardListeners(); break;
+                case 'competitions': appContainer.innerHTML += Navbar() + CompetitionScreen(); attachCompetitionListeners(); break;
             }
         };
 
@@ -124,6 +130,7 @@
                         <button onclick="navigateTo('portfolio')" class="px-4 py-2 text-sm font-medium rounded-md hover:bg-gray-100">Portfolio</button>
                         <button onclick="navigateTo('trade')" class="px-4 py-2 text-sm font-medium rounded-md hover:bg-gray-100">Trade Stocks</button>
                         <button onclick="navigateTo('leaderboard')" class="px-4 py-2 text-sm font-medium rounded-md hover:bg-gray-100">Leaderboards</button>
+                        <button onclick="navigateTo('competitions')" class="px-4 py-2 text-sm font-medium rounded-md hover:bg-gray-100">Competitions</button>
                         ${isTeacher ? `<button onclick="navigateTo('roster')" class="px-4 py-2 text-sm font-medium rounded-md hover:bg-gray-100">Student Roster</button>` : ''}
                         <button onclick="logout()" class="ml-4 px-4 py-2 text-sm font-medium text-white bg-red-500 rounded-md hover:bg-red-600">Logout</button>
                     </div>
@@ -136,9 +143,69 @@
         function TradeScreen() { return `<div class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-2xl font-bold mb-4">Trade Stocks</h2><div class="flex space-x-2"><input type="text" id="search-input" placeholder="Search for 'iPhone', 'electric cars', etc..." class="flex-grow px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"><button id="search-button" class="bg-indigo-600 text-white px-6 py-2 rounded-md hover:bg-indigo-700">Search</button></div><div id="search-results" class="mt-6"></div><div id="trade-news-feed" class="mt-8"></div></div><div id="modal-container"></div>`; }
         function RosterScreen() { return `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">Student Roster</h2><button id="add-student-btn" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm">Add Student</button></div><div id="roster-list" class="space-y-2"></div></div><div id="modal-container"></div>`; }
         function LeaderboardScreen() { return `<div class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-2xl font-bold mb-6 text-center">Leaderboards</h2><div class="flex border-b mb-6"><button id="class-leaderboard-tab" class="flex-1 py-2 text-center font-semibold text-indigo-600 border-b-2 border-indigo-600">My Class</button><button id="global-leaderboard-tab" class="flex-1 py-2 text-center font-semibold text-gray-500">Global</button></div><div id="leaderboard-content"><div id="leaderboard-loader" class="text-center">Loading leaderboard...</div></div></div>`; }
+        function CompetitionScreen() { const isTeacher = state.userData.role === 'teacher'; return `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">Competitions</h2>${isTeacher ? `<button id="create-competition-btn" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm">Create Competition</button>` : ''}</div><div id="competition-list" class="space-y-4">Loading competitions...</div></div>`; }
         function showMessage(msg, isError = true) { const el = document.getElementById('message-area'); if(el) { el.textContent = msg; el.className = isError ? 'mt-4 text-center text-red-500' : 'mt-4 text-center text-green-500'; } }
         function renderModal(content) { const el = document.getElementById('modal-container'); if(el) { el.innerHTML = `<div class="fixed inset-0 modal-bg flex items-center justify-center z-50"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl relative"><button onclick="closeModal()" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800 text-2xl">&times;</button>${content}</div></div>`; } }
         function closeModal() { const el = document.getElementById('modal-container'); if(el) el.innerHTML = ''; if (state.currentChart.instance) { state.currentChart.instance.destroy(); state.currentChart = { instance: null, data: null }; } }
+
+        // --- COMPETITION & COUNTDOWN ---
+        function startCountdownTimer(endTime) {
+            if (state.countdownTimer) clearInterval(state.countdownTimer);
+            const banner = document.getElementById('competition-banner');
+            const competition = state.portfolio.activeCompetition;
+            if (!banner || !competition) return;
+            const end = new Date(endTime).getTime();
+            state.countdownTimer = setInterval(() => {
+                const now = new Date().getTime();
+                const distance = end - now;
+                if (distance < 0) {
+                    clearInterval(state.countdownTimer);
+                    banner.innerHTML = `<strong>${competition.name}</strong> has ended! Checking results...`;
+                    navigateTo('portfolio'); // Trigger a reload to show wrap-up
+                } else {
+                    const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+                    const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                    const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                    const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+                    banner.innerHTML = `<strong>${competition.name}</strong> ends in: ${days}d ${hours}h ${minutes}m ${seconds}s`;
+                }
+            }, 1000);
+        }
+        
+        async function showWrapUpModal(competition) {
+            renderModal(`<div class="text-center p-4"><h2 class="text-3xl font-bold mb-4">Competition Over!</h2><p class="mb-6">Here's the final wrap-up for <strong>${competition.name}</strong>.</p><div id="wrap-up-content"><p>Loading results...</p></div><button id="dismiss-wrap-up" class="mt-6 bg-indigo-600 text-white px-6 py-2 rounded-md">OK</button></div>`);
+            try {
+                const wrapUpData = await callApi('getCompetitionWrapUp', { competitionId: competition._id });
+                const { classRank, globalRank, aiAnalysis } = wrapUpData;
+                const renderPodium = (title, ranks) => {
+                    let html = `<div class="mb-4"><h3 class="text-xl font-semibold mb-2">${title}</h3><ul class="text-left space-y-1">`;
+                    ranks.slice(0, 3).forEach((user, i) => {
+                        const medal = ['🥇', '🥈', '🥉'][i];
+                        html += `<li class="p-2 rounded ${i === 0 ? 'bg-yellow-100' : ''}">${medal} ${i + 1}. ${user.username} - $${user.totalValue.toFixed(2)}</li>`;
+                    });
+                    html += `</ul></div>`;
+                    return html;
+                };
+                document.getElementById('wrap-up-content').innerHTML = `
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        ${renderPodium('Class Leaderboard', classRank)}
+                        ${renderPodium('Global Leaderboard', globalRank)}
+                    </div>
+                    <div class="mt-6 text-left bg-gray-100 p-4 rounded-lg">
+                        <h4 class="font-semibold mb-2">✨ Your AI Insight</h4>
+                        <p class="text-sm">${aiAnalysis}</p>
+                    </div>
+                    <p class="mt-4 text-gray-700">Congratulations on a great competition! Your portfolio is now unlocked for regular trading.</p>
+                `;
+                document.getElementById('dismiss-wrap-up').addEventListener('click', async () => {
+                    await callApi('markCompetitionFinished');
+                    state.portfolio.activeCompetition = null;
+                    state.portfolio.isTradingPaused = false;
+                    closeModal();
+                    navigateTo('portfolio'); // Refresh portfolio page
+                });
+            } catch (error) { document.getElementById('wrap-up-content').innerHTML = `<p class="text-red-500">Could not load results.</p>`; }
+        }
 
         // --- EVENT LISTENERS & LOGIC ---
         function attachLoginListeners() {
@@ -157,170 +224,60 @@
                 state.portfolio.cash = portfolioData.cash;
                 state.portfolio.stocks = portfolioData.stocks || [];
                 state.portfolio.achievements = portfolioData.achievements || [];
+                state.portfolio.activeCompetition = portfolioData.activeCompetition || null;
+                state.portfolio.isTradingPaused = portfolioData.isTradingPaused || false;
+                state.portfolio.competitionEnded = portfolioData.competitionEnded || false;
+
+                if (state.portfolio.competitionEnded && !state.portfolio.isTradingPaused) {
+                    showWrapUpModal(state.portfolio.activeCompetition);
+                }
 
                 let symbols = state.portfolio.stocks.map(s => s.symbol);
                 if (symbols.length > 0) {
-                    const [quotes, industryData] = await Promise.all([
-                        callApi('getQuotes', { symbols }),
-                        callApi('getStockIndustries', { symbols })
-                    ]);
-                    state.portfolio.stocks.forEach(stock => {
-                        stock.currentPrice = quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice;
-                        stock.industry = industryData[stock.symbol] || 'Other';
-                        // Pre-calculate values for sorting
-                        stock.totalValue = stock.shares * stock.currentPrice;
-                        stock.gainLoss = stock.totalValue - (stock.shares * stock.purchasePrice);
-                    });
+                    const [quotes, industryData] = await Promise.all([ callApi('getQuotes', { symbols }), callApi('getStockIndustries', { symbols }) ]);
+                    state.portfolio.stocks.forEach(stock => { stock.currentPrice = quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice; stock.industry = industryData[stock.symbol] || 'Other'; stock.totalValue = stock.shares * stock.currentPrice; stock.gainLoss = stock.totalValue - (stock.shares * stock.purchasePrice); });
                 }
-                
                 const { newAchievements } = await callApi('checkAndAwardAchievements');
                 state.portfolio.achievements = newAchievements;
-
                 renderPortfolioView();
                 renderNewsFeed(symbols);
                 renderAchievements();
-
-            } catch (error) {
-                console.error("Failed to load portfolio:", error);
-                contentDiv.innerHTML = `<div class="text-red-500">Could not load data. Please try again later.</div>`;
-            }
+            } catch (error) { console.error("Failed to load portfolio:", error); contentDiv.innerHTML = `<div class="text-red-500">Could not load data. Please try again later.</div>`; }
         }
         
         function renderPortfolioView() {
             const contentDiv = document.getElementById('portfolio-content');
             const isTeacher = state.userData.role === 'teacher';
-            
-            // --- Sorting Logic ---
             const { key, order } = state.portfolioSort;
-            const sortedStocks = [...state.portfolio.stocks].sort((a, b) => {
-                let valA, valB;
-                if (key === 'symbol') { valA = a.symbol; valB = b.symbol; }
-                else if (key === 'shares') { valA = a.shares; valB = b.shares; }
-                else if (key === 'purchasePrice') { valA = a.purchasePrice; valB = b.purchasePrice; }
-                else if (key === 'currentPrice') { valA = a.currentPrice; valB = b.currentPrice; }
-                else if (key === 'totalValue') { valA = a.totalValue; valB = b.totalValue; }
-                else if (key === 'gainLoss') { valA = a.gainLoss; valB = b.gainLoss; }
-                else { return 0; }
-                if (valA < valB) return order === 'asc' ? -1 : 1;
-                if (valA > valB) return order === 'asc' ? 1 : -1;
-                return 0;
-            });
-            // --- End Sorting Logic ---
-
-            const sortArrow = (colKey) => {
-                if (state.portfolioSort.key !== colKey) return '';
-                return state.portfolioSort.order === 'asc' ? ' ▲' : ' ▼';
-            };
-
+            const sortedStocks = [...state.portfolio.stocks].sort((a, b) => { let valA, valB; if (key === 'symbol') { valA = a.symbol; valB = b.symbol; } else if (key === 'shares') { valA = a.shares; valB = b.shares; } else if (key === 'purchasePrice') { valA = a.purchasePrice; valB = b.purchasePrice; } else if (key === 'currentPrice') { valA = a.currentPrice; valB = b.currentPrice; } else if (key === 'totalValue') { valA = a.totalValue; valB = b.totalValue; } else if (key === 'gainLoss') { valA = a.gainLoss; valB = b.gainLoss; } else { return 0; } if (valA < valB) return order === 'asc' ? -1 : 1; if (valA > valB) return order === 'asc' ? 1 : -1; return 0; });
+            const sortArrow = colKey => (state.portfolioSort.key !== colKey) ? '' : (state.portfolioSort.order === 'asc' ? ' ▲' : ' ▼');
             let totalValue = state.portfolio.cash;
-            sortedStocks.forEach(s => totalValue += s.totalValue); // Use pre-calculated totalValue
-            
+            sortedStocks.forEach(s => totalValue += s.totalValue);
             const teacherCashControls = isTeacher ? `<div class="mt-2 flex justify-center space-x-2"><button class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-md hover:bg-green-200" onclick="openAdjustTeacherCashModal('add')">Add Cash</button><button class="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-md hover:bg-red-200" onclick="openAdjustTeacherCashModal('remove')">Remove Cash</button></div>` : '';
-            
-            const stockRows = sortedStocks.map(stock => {
-                const { symbol, shares, purchasePrice, currentPrice, totalValue, gainLoss } = stock;
-                const purchaseValue = shares * purchasePrice;
-                const gainLossPercent = purchaseValue !== 0 ? (gainLoss / purchaseValue) * 100 : 0;
-                const gainLossColor = gainLoss >= 0 ? 'text-green-600' : 'text-red-600';
-                return `<tr class="border-b"><td class="py-3 px-4 font-medium">${symbol}</td><td class="py-3 px-4">${shares}</td><td class="py-3 px-4">$${purchasePrice.toFixed(2)}</td><td class="py-3 px-4">$${currentPrice.toFixed(2)}</td><td class="py-3 px-4">$${totalValue.toFixed(2)}</td><td class="py-3 px-4 ${gainLossColor}">$${gainLoss.toFixed(2)} (${gainLossPercent.toFixed(2)}%)</td><td class="py-3 px-4"><button class="text-indigo-600 hover:underline" onclick="showChart('${symbol}')">View Chart</button></td></tr>`;
-            }).join('');
-
+            const stockRows = sortedStocks.map(stock => { const { symbol, shares, purchasePrice, currentPrice, totalValue, gainLoss } = stock; const purchaseValue = shares * purchasePrice; const gainLossPercent = purchaseValue !== 0 ? (gainLoss / purchaseValue) * 100 : 0; const gainLossColor = gainLoss >= 0 ? 'text-green-600' : 'text-red-600'; return `<tr class="border-b"><td class="py-3 px-4 font-medium">${symbol}</td><td class="py-3 px-4">${shares}</td><td class="py-3 px-4">$${purchasePrice.toFixed(2)}</td><td class="py-3 px-4">$${currentPrice.toFixed(2)}</td><td class="py-3 px-4">$${totalValue.toFixed(2)}</td><td class="py-3 px-4 ${gainLossColor}">$${gainLoss.toFixed(2)} (${gainLossPercent.toFixed(2)}%)</td><td class="py-3 px-4"><button class="text-indigo-600 hover:underline" onclick="showChart('${symbol}')">View Chart</button></td></tr>`; }).join('');
             const donutChartCanvas = (state.portfolio.stocks.length > 0) ? `<div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500 mb-2">Diversification</h3><div style="position: relative; height:120px"><canvas id="portfolioDonutChart"></canvas></div></div>` : `<div class="bg-gray-100 p-4 rounded-lg flex items-center justify-center"><p class="text-sm text-gray-500">Buy stocks to see your diversification.</p></div>`;
-            
-            contentDiv.innerHTML = `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">My Portfolio</h2><button id="ai-analysis-btn" class="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 text-sm">✨ Get AI Portfolio Analysis</button></div><div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center mb-6"><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Total Value</h3><p class="text-2xl font-semibold">$${totalValue.toFixed(2)}</p></div><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Cash Balance</h3><p id="cash-balance-display" class="text-2xl font-semibold">$${state.portfolio.cash.toFixed(2)}</p>${teacherCashControls}</div>${donutChartCanvas}</div><div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead class="bg-gray-50"><tr>
-                <th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('symbol')">Symbol${sortArrow('symbol')}</th>
-                <th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('shares')">Shares${sortArrow('shares')}</th>
-                <th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('purchasePrice')">Avg. Purchase Price${sortArrow('purchasePrice')}</th>
-                <th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('currentPrice')">Current Price${sortArrow('currentPrice')}</th>
-                <th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('totalValue')">Total Value${sortArrow('totalValue')}</th>
-                <th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('gainLoss')">Gain/Loss${sortArrow('gainLoss')}</th>
-                <th class="py-3 px-4 font-semibold">Actions</th>
-            </tr></thead><tbody>${stockRows.length > 0 ? stockRows : `<tr><td colspan="7" class="text-center py-4">You don't own any stocks yet. Go to the Trade page to buy some!</td></tr>`}</tbody></table></div></div>`;
+            contentDiv.innerHTML = `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">My Portfolio</h2><button id="ai-analysis-btn" class="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 text-sm">✨ Get AI Portfolio Analysis</button></div><div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center mb-6"><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Total Value</h3><p class="text-2xl font-semibold">$${totalValue.toFixed(2)}</p></div><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Cash Balance</h3><p id="cash-balance-display" class="text-2xl font-semibold">$${state.portfolio.cash.toFixed(2)}</p>${teacherCashControls}</div>${donutChartCanvas}</div><div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead class="bg-gray-50"><tr><th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('symbol')">Symbol${sortArrow('symbol')}</th><th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('shares')">Shares${sortArrow('shares')}</th><th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('purchasePrice')">Avg. Purchase Price${sortArrow('purchasePrice')}</th><th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('currentPrice')">Current Price${sortArrow('currentPrice')}</th><th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('totalValue')">Total Value${sortArrow('totalValue')}</th><th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('gainLoss')">Gain/Loss${sortArrow('gainLoss')}</th><th class="py-3 px-4 font-semibold">Actions</th></tr></thead><tbody>${stockRows.length > 0 ? stockRows : `<tr><td colspan="7" class="text-center py-4">You don't own any stocks yet. Go to the Trade page to buy some!</td></tr>`}</tbody></table></div></div>`;
             document.getElementById('ai-analysis-btn').addEventListener('click', getPortfolioAnalysis);
             if (state.portfolio.stocks.length > 0) renderDonutChart();
         }
-
-        // New sorting function
-        function sortPortfolio(key) {
-            const { portfolioSort } = state;
-            let newOrder = 'asc';
-            if (portfolioSort.key === key && portfolioSort.order === 'asc') {
-                newOrder = 'desc';
-            }
-            state.portfolioSort = { key, order: newOrder };
-            renderPortfolioView(); // Re-render the view with new sorting
-        }
-
-        function renderDonutChart() {
-            const industryData = {};
-            state.portfolio.stocks.forEach(stock => {
-                const value = stock.shares * stock.currentPrice;
-                if(industryData[stock.industry]) { industryData[stock.industry] += value; } else { industryData[stock.industry] = value; }
-            });
-            const labels = Object.keys(industryData);
-            const data = Object.values(industryData);
-            const ctx = document.getElementById('portfolioDonutChart')?.getContext('2d');
-            if (!ctx) return;
-            if (state.donutChart) state.donutChart.destroy();
-            state.donutChart = new Chart(ctx, { type: 'doughnut', data: { labels: labels, datasets: [{ data: data, backgroundColor: ['#4f46e5', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#8b5cf6'], }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } } });
-        }
-
-        async function renderNewsFeed(symbols, targetDivId = 'news-feed') {
-            const newsFeedDiv = document.getElementById(targetDivId);
-            if (!symbols || symbols.length === 0) { newsFeedDiv.innerHTML = ''; return; }
-            newsFeedDiv.innerHTML = `<h2 class="text-2xl font-bold mb-4">Related News</h2><div id="news-loader">Loading news...</div>`;
-            try {
-                const allNews = await callApi('getCompanyNews', { symbols });
-                const uniqueNews = Array.from(new Map(allNews.map(item => [item['headline'], item])).values());
-                const newsItems = uniqueNews.map(news => `<div class="bg-white p-4 rounded-lg shadow-sm mb-3"><h3 class="font-semibold">${news.headline}</h3><p class="text-xs text-gray-500">${new Date(news.datetime * 1000).toLocaleDateString()}</p><p class="text-sm mt-1">${news.summary}</p><div class="mt-2 p-3 bg-indigo-50 rounded-lg"><p class="text-sm font-medium text-indigo-800">For Kids:</p><p class="text-sm text-indigo-700" id="simplified-${news.id}">${news.simplifiedText || "Click to simplify..."}</p>${!news.simplifiedText ? `<button class="text-xs text-purple-600 hover:underline mt-1" onclick="simplifyNews('${news.id}', \`${news.headline.replace(/`/g, "'")}\`, \`${news.summary.replace(/`/g, "'")}\`)">✨ Simplify with AI</button>` : ''}</div></div>`).join('');
-                document.getElementById('news-loader').remove();
-                newsFeedDiv.innerHTML += newsItems;
-            } catch (error) { document.getElementById('news-loader').textContent = 'Could not load news.'; }
-        }
-
-        function renderAchievements() {
-            const achievementsSection = document.getElementById('achievements-section');
-            achievementsSection.innerHTML = `<h2 class="text-2xl font-bold mb-4">My Achievements</h2>`;
-            const earnedAchievements = new Set(state.portfolio.achievements || []);
-            const badgeGrid = document.createElement('div');
-            badgeGrid.className = 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4';
-            for (const badgeId in allAchievements) {
-                const achievement = allAchievements[badgeId];
-                const isEarned = earnedAchievements.has(badgeId);
-                const colorClass = isEarned ? 'text-yellow-500' : 'text-gray-400 opacity-50';
-                badgeGrid.innerHTML += `<div class="relative has-tooltip flex flex-col items-center p-4 bg-white rounded-lg shadow-sm border border-gray-200"><div class="${colorClass}">${achievement.svg}</div><p class="mt-2 text-sm font-semibold text-center">${achievement.name}</p><div class="tooltip absolute z-10 bottom-full mb-2 w-48 p-2 text-xs text-white bg-gray-800 rounded-md shadow-lg text-center">${achievement.description}</div></div>`;
-            }
-            achievementsSection.appendChild(badgeGrid);
-        }
-
-        async function simplifyNews(id, headline, summary) {
-             const targetP = document.getElementById(`simplified-${id}`);
-             targetP.textContent = "Simplifying...";
-             try {
-                const { simplifiedText } = await callApi('simplifyNews', { headline, summary });
-                await callApi('setCachedNews', { headline, simplifiedText });
-                targetP.textContent = simplifiedText;
-                targetP.nextElementSibling?.remove();
-             } catch(error) { targetP.textContent = "Could not simplify at this time."; }
-        }
-        
-        function attachTradeListeners() {
-            document.getElementById('search-button').addEventListener('click', performSearch);
-            document.getElementById('search-input').addEventListener('keyup', e => { if (e.key === 'Enter') performSearch(); });
-        }
+        function sortPortfolio(key) { const { portfolioSort } = state; let newOrder = 'asc'; if (portfolioSort.key === key && portfolioSort.order === 'asc') newOrder = 'desc'; state.portfolioSort = { key, order: newOrder }; renderPortfolioView(); }
+        function renderDonutChart() { const industryData = {}; state.portfolio.stocks.forEach(stock => { const value = stock.shares * stock.currentPrice; if(industryData[stock.industry]) { industryData[stock.industry] += value; } else { industryData[stock.industry] = value; } }); const labels = Object.keys(industryData); const data = Object.values(industryData); const ctx = document.getElementById('portfolioDonutChart')?.getContext('2d'); if (!ctx) return; if (state.donutChart) state.donutChart.destroy(); state.donutChart = new Chart(ctx, { type: 'doughnut', data: { labels: labels, datasets: [{ data: data, backgroundColor: ['#4f46e5', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#8b5cf6'], }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } } }); }
+        async function renderNewsFeed(symbols, targetDivId = 'news-feed') { const newsFeedDiv = document.getElementById(targetDivId); if (!symbols || symbols.length === 0) { newsFeedDiv.innerHTML = ''; return; } newsFeedDiv.innerHTML = `<h2 class="text-2xl font-bold mb-4">Related News</h2><div id="news-loader">Loading news...</div>`; try { const allNews = await callApi('getCompanyNews', { symbols }); const uniqueNews = Array.from(new Map(allNews.map(item => [item['headline'], item])).values()); const newsItems = uniqueNews.map(news => `<div class="bg-white p-4 rounded-lg shadow-sm mb-3"><h3 class="font-semibold">${news.headline}</h3><p class="text-xs text-gray-500">${new Date(news.datetime * 1000).toLocaleDateString()}</p><p class="text-sm mt-1">${news.summary}</p><div class="mt-2 p-3 bg-indigo-50 rounded-lg"><p class="text-sm font-medium text-indigo-800">For Kids:</p><p class="text-sm text-indigo-700" id="simplified-${news.id}">${news.simplifiedText || "Click to simplify..."}</p>${!news.simplifiedText ? `<button class="text-xs text-purple-600 hover:underline mt-1" onclick="simplifyNews('${news.id}', \`${news.headline.replace(/`/g, "'")}\`, \`${news.summary.replace(/`/g, "'")}\`)">✨ Simplify with AI</button>` : ''}</div></div>`).join(''); document.getElementById('news-loader').remove(); newsFeedDiv.innerHTML += newsItems; } catch (error) { document.getElementById('news-loader').textContent = 'Could not load news.'; } }
+        function renderAchievements() { const achievementsSection = document.getElementById('achievements-section'); achievementsSection.innerHTML = `<h2 class="text-2xl font-bold mb-4">My Achievements</h2>`; const earnedAchievements = new Set(state.portfolio.achievements || []); const badgeGrid = document.createElement('div'); badgeGrid.className = 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4'; for (const badgeId in allAchievements) { const achievement = allAchievements[badgeId]; const isEarned = earnedAchievements.has(badgeId); const colorClass = isEarned ? 'text-yellow-500' : 'text-gray-400 opacity-50'; badgeGrid.innerHTML += `<div class="relative has-tooltip flex flex-col items-center p-4 bg-white rounded-lg shadow-sm border border-gray-200"><div class="${colorClass}">${achievement.svg}</div><p class="mt-2 text-sm font-semibold text-center">${achievement.name}</p><div class="tooltip absolute z-10 bottom-full mb-2 w-48 p-2 text-xs text-white bg-gray-800 rounded-md shadow-lg text-center">${achievement.description}</div></div>`; } achievementsSection.appendChild(badgeGrid); }
+        async function simplifyNews(id, headline, summary) { const targetP = document.getElementById(`simplified-${id}`); targetP.textContent = "Simplifying..."; try { const { simplifiedText } = await callApi('simplifyNews', { headline, summary }); await callApi('setCachedNews', { headline, simplifiedText }); targetP.textContent = simplifiedText; targetP.nextElementSibling?.remove(); } catch(error) { targetP.textContent = "Could not simplify at this time."; } }
+        function attachTradeListeners() { document.getElementById('search-button').addEventListener('click', performSearch); document.getElementById('search-input').addEventListener('keyup', e => { if (e.key === 'Enter') performSearch(); }); }
         
         async function performSearch() {
-            const query = document.getElementById('search-input').value;
-            const resultsDiv = document.getElementById('search-results');
-            const newsDiv = document.getElementById('trade-news-feed');
+            const query = document.getElementById('search-input').value, resultsDiv = document.getElementById('search-results'), newsDiv = document.getElementById('trade-news-feed');
             if (!query) return;
-            resultsDiv.innerHTML = `<div>Searching...</div>`;
-            newsDiv.innerHTML = '';
+            resultsDiv.innerHTML = `<div>Searching...</div>`; newsDiv.innerHTML = '';
             try {
                 const results = await callApi('intelligentSearch', { query });
                 state.searchResults = results;
                 if (state.searchResults.length === 0) { resultsDiv.innerHTML = `<div>No results found. Try a different search term.</div>`; return; }
-                const resultItems = state.searchResults.map(result => `<div class="flex justify-between items-center p-3 border-b hover:bg-gray-50"><div><p class="font-bold">${result.symbol}</p><p class="text-sm text-gray-600">${result.description}</p></div><div class="flex items-center"><button class="text-indigo-600 hover:underline text-sm mr-4" onclick="showChart('${result.symbol}')">View Chart</button><button class="bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded-md hover:bg-purple-200" onclick="getCompanyExplanation('${result.description.replace(/'/g, "\\'")}', '${result.symbol}')">✨ Explain</button><button class="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600 ml-2" onclick="openTradeModal('${result.symbol}')">Trade</button></div></div>`).join('');
+                const tradeBtnDisabled = state.portfolio.isTradingPaused ? 'disabled' : '';
+                const tradeBtnClasses = state.portfolio.isTradingPaused ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600';
+                const resultItems = state.searchResults.map(result => `<div class="flex justify-between items-center p-3 border-b hover:bg-gray-50"><div><p class="font-bold">${result.symbol}</p><p class="text-sm text-gray-600">${result.description}</p></div><div class="flex items-center"><button class="text-indigo-600 hover:underline text-sm mr-4" onclick="showChart('${result.symbol}')">View Chart</button><button class="bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded-md hover:bg-purple-200" onclick="getCompanyExplanation('${result.description.replace(/'/g, "\\'")}', '${result.symbol}')">✨ Explain</button><button class="text-white px-4 py-2 rounded-md ml-2 ${tradeBtnClasses}" ${tradeBtnDisabled} onclick="openTradeModal('${result.symbol}')">Trade</button></div></div>`).join('');
                 resultsDiv.innerHTML = resultItems;
                 renderNewsFeed(results.map(r => r.symbol), 'trade-news-feed');
             } catch (error) { resultsDiv.innerHTML = `<div class="text-red-500">Search failed: ${error.message}</div>`; }
@@ -356,10 +313,7 @@
                 state.portfolio = newPortfolio;
                 messageDiv.textContent = `Successfully ${type === 'buy' ? 'bought' : 'sold'} ${quantity} shares of ${symbol}!`;
                 messageDiv.className = 'mt-4 text-center text-green-600';
-            } catch (error) {
-                messageDiv.textContent = `Error: ${error.message}`;
-                messageDiv.className = 'mt-4 text-center text-red-600';
-            }
+            } catch (error) { messageDiv.textContent = `Error: ${error.message}`; messageDiv.className = 'mt-4 text-center text-red-600'; }
         }
         
         async function attachRosterListeners() {
@@ -395,16 +349,7 @@
             });
         }
         
-        async function removeStudent(studentId, username) {
-            if (confirm(`Are you sure you want to remove ${username}? This action cannot be undone.`)) {
-                try {
-                    await callApi('removeStudent', { studentId });
-                    state.studentRoster = state.studentRoster.filter(s => s._id !== studentId);
-                    renderRoster();
-                } catch (error) { alert(`Failed to remove student: ${error.message}`); }
-            }
-        }
-        
+        async function removeStudent(studentId, username) { if (confirm(`Are you sure you want to remove ${username}? This action cannot be undone.`)) { try { await callApi('removeStudent', { studentId }); state.studentRoster = state.studentRoster.filter(s => s._id !== studentId); renderRoster(); } catch (error) { alert(`Failed to remove student: ${error.message}`); } } }
         function openAdjustCashModal(studentId, username, currentCash, type) {
             const modalContent = `<h3 class="text-xl font-bold mb-4">${type === 'add' ? 'Add' : 'Remove'} Cash for ${username}</h3><p class="text-sm mb-4">Current Balance: $${currentCash.toFixed(2)}</p><form id="adjust-cash-form" class="space-y-4"><div><label for="cash-amount">Amount</label><input type="number" id="cash-amount" min="0.01" step="0.01" required class="mt-1 w-full border rounded-md px-3 py-2"></div><button type="submit" class="w-full bg-indigo-600 text-white py-2 rounded-md">${type === 'add' ? 'Add to Balance' : 'Remove from Balance'}</button></form><div id="modal-message" class="mt-4 text-center"></div>`;
             renderModal(modalContent);
@@ -422,36 +367,12 @@
                 } catch (error) { msgDiv.className = 'mt-4 text-center text-red-600'; msgDiv.textContent = `Error: ${error.message}`; }
             });
         }
-
         function openEditStudentModal(studentId, currentUsername) {
             const modalContent = `<h3 class="text-xl font-bold mb-4">Edit Student: ${currentUsername}</h3><div class="space-y-6"><div><h4 class="font-semibold mb-2">Change Username</h4><form id="edit-username-form" class="flex items-center space-x-2"><input type="text" id="new-username" value="${currentUsername}" required class="flex-grow border rounded-md px-3 py-2"><button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-md">Save Username</button></form></div><div class="border-t pt-4"><h4 class="font-semibold mb-2">Reset Password</h4><form id="reset-password-form" class="flex items-center space-x-2"><input type="password" id="new-password" placeholder="Enter new password" required class="flex-grow border rounded-md px-3 py-2"><button type="submit" class="bg-orange-500 text-white px-4 py-2 rounded-md">Reset Password</button></form></div></div><div id="modal-message" class="mt-4 text-center"></div>`;
             renderModal(modalContent);
-            document.getElementById('edit-username-form').addEventListener('submit', async e => {
-                e.preventDefault();
-                const newUsername = e.target.elements['new-username'].value;
-                if (confirm(`Are you sure you want to change this student's username to "${newUsername}"?`)) {
-                    try {
-                        await callApi('updateStudentCredentials', { studentId, newUsername });
-                        const student = state.studentRoster.find(s => s._id === studentId);
-                        student.username = newUsername;
-                        renderRoster();
-                        closeModal();
-                    } catch (error) { document.getElementById('modal-message').textContent = `Error: ${error.message}`; }
-                }
-            });
-            document.getElementById('reset-password-form').addEventListener('submit', async e => {
-                e.preventDefault();
-                const newPassword = e.target.elements['new-password'].value;
-                if (confirm("Are you sure you want to reset this student's password?")) {
-                    try {
-                        await callApi('updateStudentCredentials', { studentId, newPassword });
-                        alert("Password has been successfully reset!");
-                        closeModal();
-                    } catch (error) { document.getElementById('modal-message').textContent = `Error: ${error.message}`; }
-                }
-            });
+            document.getElementById('edit-username-form').addEventListener('submit', async e => { e.preventDefault(); const newUsername = e.target.elements['new-username'].value; if (confirm(`Are you sure you want to change this student's username to "${newUsername}"?`)) { try { await callApi('updateStudentCredentials', { studentId, newUsername }); const student = state.studentRoster.find(s => s._id === studentId); student.username = newUsername; renderRoster(); closeModal(); } catch (error) { document.getElementById('modal-message').textContent = `Error: ${error.message}`; } } });
+            document.getElementById('reset-password-form').addEventListener('submit', async e => { e.preventDefault(); const newPassword = e.target.elements['new-password'].value; if (confirm("Are you sure you want to reset this student's password?")) { try { await callApi('updateStudentCredentials', { studentId, newPassword }); alert("Password has been successfully reset!"); closeModal(); } catch (error) { document.getElementById('modal-message').textContent = `Error: ${error.message}`; } } });
         }
-        
         async function showChart(symbol) {
             const modalContent = `<div class="text-center mb-4"><h3 class="text-xl font-bold">${symbol} Chart</h3></div><div class="chart-container"><canvas id="stockChart"></canvas></div><div class="flex justify-center space-x-2 mt-4" id="chart-time-ranges"></div><div id="chart-loader" class="text-center mt-2">Loading chart data...</div>`;
             renderModal(modalContent);
@@ -464,19 +385,12 @@
                 updateChart(document.querySelector('#chart-time-ranges button:nth-child(5)'), '1Y');
             } catch (error) { document.getElementById('chart-loader').textContent = `Could not load chart: ${error.message}`; }
         }
-
-        function renderTimeRangeButtons() {
-            const container = document.getElementById('chart-time-ranges');
-            const ranges = ['1W', '1M', '3M', '6M', '1Y', '5Y', 'All'];
-            container.innerHTML = ranges.map(range => `<button class="time-range-btn px-3 py-1 text-sm rounded-md bg-gray-200 hover:bg-gray-300" onclick="updateChart(this, '${range}')">${range}</button>`).join('');
-        }
-
+        function renderTimeRangeButtons() { const container = document.getElementById('chart-time-ranges'); const ranges = ['1W', '1M', '3M', '6M', '1Y', '5Y', 'All']; container.innerHTML = ranges.map(range => `<button class="time-range-btn px-3 py-1 text-sm rounded-md bg-gray-200 hover:bg-gray-300" onclick="updateChart(this, '${range}')">${range}</button>`).join(''); }
         function updateChart(btn, range) {
             document.querySelectorAll('.time-range-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             const { c, t } = state.currentChart.data;
-            const now = new Date();
-            let startDate = new Date();
+            const now = new Date(); let startDate = new Date();
             switch (range) {
                 case '1W': startDate.setDate(now.getDate() - 7); break;
                 case '1M': startDate.setMonth(now.getMonth() - 1); break;
@@ -493,33 +407,10 @@
             if (state.currentChart.instance) state.currentChart.instance.destroy();
             state.currentChart.instance = new Chart(ctx, {
                 type: 'line',
-                data: {
-                    labels: filteredLabels,
-                    datasets: [{
-                        data: filteredData,
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        tension: 0.1,
-                        segment: {
-                            borderColor: ctx => {
-                                const y1 = ctx.p0.parsed.y;
-                                const y2 = ctx.p1.parsed.y;
-                                if (y2 > y1) return 'rgb(22, 163, 74)'; // Green for up
-                                if (y1 > y2) return 'rgb(220, 38, 38)'; // Red for down
-                                return 'rgb(234, 179, 8)'; // Yellow for same
-                            }
-                        }
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: { x: { type: 'time', time: { unit: 'month' }, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 7 } }, y: { grid: { color: '#e5e7eb' }, ticks: { callback: value => '$' + value } } }
-                }
+                data: { labels: filteredLabels, datasets: [{ data: filteredData, borderWidth: 2, pointRadius: 0, tension: 0.1, segment: { borderColor: ctx => { const y1 = ctx.p0.parsed.y, y2 = ctx.p1.parsed.y; if (y2 > y1) return 'rgb(22, 163, 74)'; if (y1 > y2) return 'rgb(220, 38, 38)'; return 'rgb(234, 179, 8)'; } } }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { type: 'time', time: { unit: 'month' }, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 7 } }, y: { grid: { color: '#e5e7eb' }, ticks: { callback: value => '$' + value } } } }
             });
         }
-        
         function openAdjustTeacherCashModal(type) {
             const modalContent = `<h3 class="text-xl font-bold mb-4">${type === 'add' ? 'Add' : 'Remove'} Cash</h3><form id="adjust-teacher-cash-form" class="space-y-4"><div><label for="cash-amount">Amount</label><input type="number" id="cash-amount" min="0.01" step="0.01" required class="mt-1 w-full border rounded-md px-3 py-2"></div><button type="submit" class="w-full bg-indigo-600 text-white py-2 rounded-md">${type === 'add' ? 'Add to Balance' : 'Remove from Balance'}</button></form><div id="modal-message" class="mt-4 text-center"></div>`;
             renderModal(modalContent);
@@ -528,76 +419,26 @@
                 let amount = parseFloat(e.target.elements['cash-amount'].value);
                 if (type === 'remove') amount = -amount;
                 const msgDiv = document.getElementById('modal-message');
-                try {
-                    const { newCashBalance } = await callApi('updateTeacherCash', { amount });
-                    state.portfolio.cash = newCashBalance;
-                    document.getElementById('cash-balance-display').textContent = `$${newCashBalance.toFixed(2)}`;
-                    closeModal();
-                } catch (error) {
-                    msgDiv.className = 'mt-4 text-center text-red-600';
-                    msgDiv.textContent = `Error: ${error.message}`;
-                }
+                try { const { newCashBalance } = await callApi('updateTeacherCash', { amount }); state.portfolio.cash = newCashBalance; document.getElementById('cash-balance-display').textContent = `$${newCashBalance.toFixed(2)}`; closeModal(); } 
+                catch (error) { msgDiv.className = 'mt-4 text-center text-red-600'; msgDiv.textContent = `Error: ${error.message}`; }
             });
         }
-
-
-        async function getCompanyExplanation(companyName, symbol) {
-            const modalContent = `<h3 class="text-xl font-bold mb-2">${companyName} (${symbol})</h3><p id="explanation-text">Loading explanation...</p>`;
-            renderModal(modalContent);
-            try {
-                const { explanation } = await callApi('getCompanyExplanation', { companyName, symbol });
-                document.getElementById('explanation-text').textContent = explanation;
-            } catch (error) { document.getElementById('explanation-text').textContent = 'Could not get explanation at this time.'; }
-        }
-        
-        async function getPortfolioAnalysis() {
-            const portfolioSummary = { cash: state.portfolio.cash, holdings: state.portfolio.stocks.map(s => ({ symbol: s.symbol, value: s.shares * s.currentPrice })) };
-            const modalContent = `<h3 class="text-xl font-bold mb-2">AI Portfolio Analysis</h3><p id="analysis-text">Thinking...</p>`;
-            renderModal(modalContent);
-            try {
-                 const { analysis } = await callApi('getPortfolioAnalysis', { portfolioSummary });
-                 document.getElementById('analysis-text').textContent = analysis;
-            } catch(error) { document.getElementById('analysis-text').textContent = 'Could not get analysis at this time.'; }
-        }
-        
+        async function getCompanyExplanation(companyName, symbol) { const modalContent = `<h3 class="text-xl font-bold mb-2">${companyName} (${symbol})</h3><p id="explanation-text">Loading explanation...</p>`; renderModal(modalContent); try { const { explanation } = await callApi('getCompanyExplanation', { companyName, symbol }); document.getElementById('explanation-text').textContent = explanation; } catch (error) { document.getElementById('explanation-text').textContent = 'Could not get explanation at this time.'; } }
+        async function getPortfolioAnalysis() { const portfolioSummary = { cash: state.portfolio.cash, holdings: state.portfolio.stocks.map(s => ({ symbol: s.symbol, value: s.shares * s.currentPrice })) }; const modalContent = `<h3 class="text-xl font-bold mb-2">AI Portfolio Analysis</h3><p id="analysis-text">Thinking...</p>`; renderModal(modalContent); try { const { analysis } = await callApi('getPortfolioAnalysis', { portfolioSummary }); document.getElementById('analysis-text').textContent = analysis; } catch(error) { document.getElementById('analysis-text').textContent = 'Could not get analysis at this time.'; } }
         async function attachLeaderboardListeners() {
             const contentDiv = document.getElementById('leaderboard-content');
             let leaderboardData; 
-            const classTab = document.getElementById('class-leaderboard-tab');
-            const globalTab = document.getElementById('global-leaderboard-tab');
-            const renderLeaderboard = (type) => {
-                const data = type === 'class' ? leaderboardData.class : leaderboardData.global;
-                if (!data || data.length === 0) { contentDiv.innerHTML = `<div class="text-center">No players on this leaderboard yet.</div>`; return; }
-                const rows = data.map((player, index) => `<tr class="border-b"><td class="py-3 px-4 font-medium">${index + 1}</td><td class="py-3 px-4">${player.username}</td><td class="py-3 px-4">$${player.totalValue.toFixed(2)}</td><td class="py-3 px-4">$${player.cash.toFixed(2)}</td></tr>`).join('');
-                contentDiv.innerHTML = `<div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead class="bg-gray-50"><tr><th class="py-3 px-4 font-semibold">Rank</th><th class="py-3 px-4 font-semibold">Name</th><th class="py-3 px-4 font-semibold">Total Value</th><th class="py-3 px-4 font-semibold">Cash Balance</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-            };
+            const classTab = document.getElementById('class-leaderboard-tab'), globalTab = document.getElementById('global-leaderboard-tab');
+            const renderLeaderboard = (type) => { const data = type === 'class' ? leaderboardData.class : leaderboardData.global; if (!data || data.length === 0) { contentDiv.innerHTML = `<div class="text-center">No players on this leaderboard yet.</div>`; return; } const rows = data.map((player, index) => `<tr class="border-b"><td class="py-3 px-4 font-medium">${index + 1}</td><td class="py-3 px-4">${player.username}</td><td class="py-3 px-4">$${player.totalValue.toFixed(2)}</td><td class="py-3 px-4">$${player.cash.toFixed(2)}</td></tr>`).join(''); contentDiv.innerHTML = `<div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead class="bg-gray-50"><tr><th class="py-3 px-4 font-semibold">Rank</th><th class="py-3 px-4 font-semibold">Name</th><th class="py-3 px-4 font-semibold">Total Value</th><th class="py-3 px-4 font-semibold">Cash Balance</th></tr></thead><tbody>${rows}</tbody></table></div>`; };
             classTab.addEventListener('click', () => { globalTab.classList.remove('text-indigo-600', 'border-indigo-600'); globalTab.classList.add('text-gray-500'); classTab.classList.add('text-indigo-600', 'border-indigo-600'); renderLeaderboard('class'); });
             globalTab.addEventListener('click', () => { classTab.classList.remove('text-indigo-600', 'border-indigo-600'); classTab.classList.add('text-gray-500'); globalTab.classList.add('text-indigo-600', 'border-indigo-600'); renderLeaderboard('global'); });
             try { leaderboardData = await callApi('getLeaderboards'); renderLeaderboard('class'); } catch (error) { contentDiv.innerHTML = `<div class="text-red-500">Could not load leaderboards.</div>`; }
         }
-
-
-        function logout() {
-            localStorage.removeItem('sessionToken');
-            state.userData = null;
-            navigateTo('login');
-        }
-
-        async function init() {
-            const token = localStorage.getItem('sessionToken');
-            if (token) {
-                try {
-                    const data = await callApi('validateSession');
-                    state.userData = data;
-                    navigateTo('portfolio');
-                } catch (error) { logout(); }
-            } else { navigateTo('login'); }
-        }
-
+        function logout() { localStorage.removeItem('sessionToken'); state.userData = null; navigateTo('login'); }
+        async function init() { const token = localStorage.getItem('sessionToken'); if (token) { try { const data = await callApi('validateSession'); state.userData = data; navigateTo('portfolio'); } catch (error) { logout(); } } else { navigateTo('login'); } }
         window.navigateTo = navigateTo; window.logout = logout; window.openTradeModal = openTradeModal; window.closeModal = closeModal; window.showChart = showChart; window.simplifyNews = simplifyNews; window.getCompanyExplanation = getCompanyExplanation; window.openAddStudentModal = openAddStudentModal; window.openAdjustCashModal = openAdjustCashModal; window.removeStudent = removeStudent; window.updateChart = updateChart; window.openAdjustTeacherCashModal = openAdjustTeacherCashModal; window.openEditStudentModal = openEditStudentModal;
         init();
         function render() { App(); }
     </script>
 </body>
 </html>
-

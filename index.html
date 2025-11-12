@@ -528,7 +528,10 @@
 
         function logout() { localStorage.removeItem('sessionToken'); state.userData = null; navigateTo('login'); }
         async function init() { const token = localStorage.getItem('sessionToken'); if (token) { try { const data = await callApi('validateSession'); state.userData = data; navigateTo('portfolio'); } catch (error) { logout(); } } else { navigateTo('login'); } }
-        window.navigateTo = navigateTo; window.logout = logout; window.openTradeModal = openTradeModal; window.closeModal = closeModal; window.showChart = showChart; window.simplifyNews = simplifyNews; window.getCompanyExplanation = getCompanyExplanation; window.openAddStudentModal = openAddStudentModal; window.openAdjustCashModal = openAdjustCashModal; window.removeStudent = removeStudent; window.updateChart = updateChart; window.openAdjustTeacherCashModal = openAdjustTeacherCashModal; window.openEditStudentModal = openEditStudentModal; window.joinCompetition = joinCompetition; window.openCreateCompetitionModal = openCreateCompetitionModal;
+        
+        // --- THE FIX: Make the new functions globally accessible ---
+        window.navigateTo = navigateTo; window.logout = logout; window.openTradeModal = openTradeModal; window.closeModal = closeModal; window.showChart = showChart; window.simplifyNews = simplifyNews; window.getCompanyExplanation = getCompanyExplanation; window.openAddStudentModal = openAddStudentModal; window.openAdjustCashModal = openAdjustCashModal; window.removeStudent = removeStudent; window.updateChart = updateChart; window.openAdjustTeacherCashModal = openAdjustTeacherCashModal; window.openEditStudentModal = openEditStudentModal; window.joinCompetition = joinCompetition; window.openCreateCompetitionModal = openCreateCompetitionModal; window.sortPortfolio = sortPortfolio;
+        
         init();
         function render() { App(); }
     </script>

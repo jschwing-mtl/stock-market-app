@@ -27,15 +27,7 @@ export default async function handler(req, res) {
         const { action, payload, token } = req.body;
         let userData;
 
-        const protectedActions = [
-            'getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 
-            'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'getQuotes', 
-            'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 
-            'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 
-            'getLeaderboards', 'checkAndAwardAchievements', 'getStockIndustries', 
-            'createCompetition', 'getCompetitions', 'joinCompetition', 
-            'getCompetitionWrapUp', 'markCompetitionFinished'
-        ];
+        const protectedActions = ['getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'toggleTradingStatus', 'getQuotes', 'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 'getLeaderboards', 'checkAndAwardAchievements', 'getStockIndustries'];
         
         if (protectedActions.includes(action)) {
             if (!token) throw new Error('Authentication token is required.');
@@ -54,6 +46,7 @@ export default async function handler(req, res) {
             case 'updateStudentCash': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await updateStudentCash(db.collection('users'), payload.studentId, payload.amount, userData.userId); break;
             case 'updateTeacherCash': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await updateTeacherCash(db.collection('users'), userData.userId, payload.amount); break;
             case 'updateStudentCredentials': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await updateStudentCredentials(db.collection('users'), payload.studentId, userData.userId, payload.newUsername, payload.newPassword); break;
+            case 'toggleTradingStatus': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await toggleTradingStatus(db.collection('users'), payload.studentId, payload.isPaused, userData.userId); break;
             case 'getPortfolio': responseData = await getPortfolio(db.collection('users'), userData.userId); break;
             case 'executeTrade': responseData = await executeTrade(db.collection('users'), userData.userId, payload); break;
             case 'getQuotes': responseData = await getQuotes(payload.symbols); break;
@@ -67,11 +60,6 @@ export default async function handler(req, res) {
             case 'getLeaderboards': responseData = await getLeaderboards(db.collection('users'), userData); break;
             case 'checkAndAwardAchievements': responseData = await checkAndAwardAchievements(db, userData.userId); break;
             case 'getStockIndustries': responseData = await getStockIndustries(payload.symbols); break;
-            case 'createCompetition': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await createCompetition(db.collection('competitions'), { ...payload, creatorName: userData.username, creatorId: userData.userId }); break;
-            case 'getCompetitions': responseData = await getCompetitions(db.collection('competitions'), db.collection('users'), userData.userId); break;
-            case 'joinCompetition': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await joinCompetition(db.collection('users'), payload.competitionId, userData.userId); break;
-            case 'getCompetitionWrapUp': responseData = await getCompetitionWrapUp(db, payload.competitionId, userData); break;
-            case 'markCompetitionFinished': responseData = await markCompetitionFinished(db.collection('users'), userData.userId); break;
             default: throw new Error(`Unknown action: ${action}`);
         }
         
@@ -90,7 +78,8 @@ async function registerUser(collection, { username, password }) {
     if (password !== TEACHER_REGISTRATION_PASSWORD) throw new Error('Invalid registration password.');
     if (await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } })) throw new Error('Username already exists.');
     const hashedPassword = await bcrypt.hash(password, 10);
-    await collection.insertOne({ username, hashedPassword, role: 'teacher', cash: 0, stocks: [], achievements: [], teacherId: null, activeCompetition: null, competitionEnded: false });
+    const role = 'teacher';
+    await collection.insertOne({ username, hashedPassword, role, cash: 0, stocks: [], achievements: [], teacherId: null, activeCompetition: null, competitionEnded: false, lastSplitCheck: 0 });
     return { success: true };
 }
 
@@ -107,11 +96,13 @@ async function loginUser(collection, { username, password }) {
 async function addStudent(collection, { username, password, startingCash, teacherId }) {
     if (await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } })) throw new Error('Username already exists.');
     const hashedPassword = await bcrypt.hash(password, 10);
-    const { insertedId } = await collection.insertOne({ username, hashedPassword, role: 'student', cash: startingCash || 100000, stocks: [], achievements: [], teacherId: teacherId, isTradingPaused: false, activeCompetition: null, competitionEnded: false });
-    return { _id: insertedId, username, cash: startingCash || 100000 };
+    const { insertedId } = await collection.insertOne({ username, hashedPassword, role: 'student', cash: startingCash || 100000, stocks: [], achievements: [], isTradingPaused: false, teacherId: teacherId, lastSplitCheck: 0 });
+    return { _id: insertedId, username, cash: startingCash || 100000, isTradingPaused: false };
 }
 
-async function getStudentRoster(collection, teacherId) { return await collection.find({ $or: [{ teacherId: teacherId }, { teacherId: new ObjectId(teacherId) }] }).project({ hashedPassword: 0 }).toArray(); }
+async function getStudentRoster(collection, teacherId) { 
+    return await collection.find({ $or: [{ teacherId: teacherId }, { teacherId: new ObjectId(teacherId) }] }).project({ hashedPassword: 0 }).toArray(); 
+}
 async function removeStudent(collection, studentId, teacherId) { const result = await collection.deleteOne({ _id: new ObjectId(studentId), $or: [{ teacherId: teacherId }, { teacherId: new ObjectId(teacherId) }] }); if (result.deletedCount === 0) throw new Error('Student not found or not under your roster.'); return { success: true }; }
 async function updateStudentCash(collection, studentId, amount, teacherId) { const result = await collection.updateOne({ _id: new ObjectId(studentId), $or: [{ teacherId: teacherId }, { teacherId: new ObjectId(teacherId) }] }, { $inc: { cash: amount } }); if (result.matchedCount === 0) throw new Error('Student not found or not under your roster.'); return { success: true }; }
 async function updateTeacherCash(collection, teacherId, amount) { const result = await collection.updateOne({ _id: new ObjectId(teacherId), role: 'teacher' }, { $inc: { cash: amount } }); if (result.matchedCount === 0) throw new Error('Teacher not found.'); const updatedUser = await collection.findOne({ _id: new ObjectId(teacherId) }); return { newCashBalance: updatedUser.cash }; }
@@ -124,12 +115,56 @@ async function updateStudentCredentials(collection, studentId, teacherId, newUse
     if (result.matchedCount === 0) throw new Error('Student not found or not under your roster.');
     return { success: true };
 }
+async function toggleTradingStatus(collection, studentId, isPaused, teacherId) {
+    let filter;
+    if (studentId) { filter = { _id: new ObjectId(studentId), $or: [{ teacherId: teacherId }, { teacherId: new ObjectId(teacherId) }] }; } 
+    else { filter = { $or: [{ teacherId: teacherId }, { teacherId: new ObjectId(teacherId) }] }; }
+    await collection.updateMany(filter, { $set: { isTradingPaused: isPaused } });
+    const updatedStudents = await collection.find(filter).project({_id: 1, isTradingPaused: 1}).toArray();
+    return { success: true, updatedStudents };
+}
 
 // --- PORTFOLIO & TRADING ---
 async function getPortfolio(collection, userId) {
-    const user = await collection.findOne({ _id: new ObjectId(userId) }, { projection: { cash: 1, stocks: 1, achievements: 1, isTradingPaused: 1, activeCompetition: 1, competitionEnded: 1 } });
+    const user = await collection.findOne({ _id: new ObjectId(userId) }, { projection: { cash: 1, stocks: 1, achievements: 1, isTradingPaused: 1, activeCompetition: 1, competitionEnded: 1, lastSplitCheck: 1 } });
     if (!user) throw new Error('User not found.');
-    // Check if active competition has ended
+
+    // --- STOCK SPLIT CHECK LOGIC ---
+    const now = Date.now();
+    // Check for splits if it's been more than 24 hours since last check (86400000 ms) or if never checked.
+    if (!user.lastSplitCheck || (now - user.lastSplitCheck) > 86400000) {
+        let portfolioUpdated = false;
+        if (user.stocks && user.stocks.length > 0) {
+            for (const stock of user.stocks) {
+                // Get split history for this symbol
+                try {
+                    const splits = await fmpApiCall(`historical-price-full/stock_split/${stock.symbol}`);
+                    if (splits && splits.historical) {
+                        for (const split of splits.historical) {
+                            const splitDate = new Date(split.date).getTime() / 1000; // seconds
+                            // If split happened AFTER purchase AND AFTER last check (or if never checked)
+                            // Use 0 as default lastSplitCheck to catch all historical splits for new fixes
+                            const lastCheckTime = user.lastSplitCheck ? user.lastSplitCheck / 1000 : 0;
+                            
+                            if (splitDate > stock.purchaseDate && splitDate > lastCheckTime) {
+                                const numerator = split.numerator;
+                                const denominator = split.denominator;
+                                // Apply split math
+                                stock.shares = stock.shares * (numerator / denominator);
+                                stock.purchasePrice = stock.purchasePrice * (denominator / numerator);
+                                portfolioUpdated = true;
+                                console.log(`Applied ${numerator}:${denominator} split for ${stock.symbol} on user ${userId}`);
+                            }
+                        }
+                    }
+                } catch (e) { console.error(`Failed to check splits for ${stock.symbol}`, e); }
+            }
+        }
+        // Update the timestamp regardless of whether a split was found, to prevent spamming the API
+        await collection.updateOne({ _id: user._id }, { $set: { lastSplitCheck: now, stocks: user.stocks } });
+    }
+    // --- END STOCK SPLIT CHECK ---
+
     if (user.activeCompetition && !user.competitionEnded && new Date().getTime() > user.activeCompetition.endTime) {
         await collection.updateOne({ _id: user._id }, { $set: { isTradingPaused: true, competitionEnded: true } });
         user.isTradingPaused = true;
@@ -247,98 +282,44 @@ async function createCompetition(collection, { name, startTime, endTime, creator
     await collection.insertOne(newCompetition);
     return newCompetition;
 }
-
 async function getCompetitions(compCollection, usersCollection, userId) {
     const competitions = await compCollection.find({ endTime: { $gt: new Date().getTime() } }).sort({ startTime: 1 }).toArray();
     const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
     return { competitions, userCompetitionId: user.activeCompetition ? user.activeCompetition._id : null };
 }
-
 async function joinCompetition(usersCollection, competitionId, teacherId) {
     const competition = await connectToDatabase().then(db => db.collection('competitions').findOne({ _id: new ObjectId(competitionId) }));
     if (!competition) throw new Error("Competition not found.");
-    
-    // Find all users associated with this teacher (the teacher themself + their students)
-    const userIdsToUpdate = (await usersCollection.find({ $or: [{ _id: new ObjectId(teacherId) }, { teacherId: teacherId }] }).project({_id: 1}).toArray()).map(u => u._id);
-
-    // Update all these users to join the competition
-    await usersCollection.updateMany(
-        { _id: { $in: userIdsToUpdate } },
-        { $set: { activeCompetition: competition, isTradingPaused: false, competitionEnded: false } }
-    );
-    
-    // Add participant IDs to the competition for tracking
-    await connectToDatabase().then(db => db.collection('competitions').updateOne(
-        { _id: competition._id },
-        { $addToSet: { participants: { $each: userIdsToUpdate } } }
-    ));
-    
+    const userIdsToUpdate = (await usersCollection.find({ $or: [{ _id: new ObjectId(teacherId) }, { teacherId: teacherId }, { teacherId: new ObjectId(teacherId) }] }).project({_id: 1}).toArray()).map(u => u._id);
+    await usersCollection.updateMany({ _id: { $in: userIdsToUpdate } }, { $set: { activeCompetition: competition, isTradingPaused: false, competitionEnded: false } });
+    await connectToDatabase().then(db => db.collection('competitions').updateOne({ _id: competition._id }, { $addToSet: { participants: { $each: userIdsToUpdate } } }));
     return { success: true };
 }
-
 async function getCompetitionWrapUp(db, competitionId, currentUser) {
     const competition = await db.collection('competitions').findOne({ _id: new ObjectId(competitionId) });
     if (!competition) throw new Error("Competition not found.");
-    
-    // Get all participants for the global rank
     const globalParticipants = await db.collection('users').find({ _id: { $in: competition.participants } }).project({ username: 1, cash: 1, stocks: 1, teacherId: 1, role: 1 }).toArray();
     const allSymbols = [...new Set(globalParticipants.flatMap(u => u.stocks ? u.stocks.map(s => s.symbol) : []))];
-    let quotes = {};
-    if (allSymbols.length > 0) quotes = await getQuotes(allSymbols);
-
-    const getRankedUsers = (users) => {
-        return users.map(user => {
-            let stockValue = 0;
-            if (user.stocks) user.stocks.forEach(stock => { stockValue += stock.shares * (quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice); });
-            return { ...user, totalValue: user.cash + stockValue };
-        }).sort((a, b) => b.totalValue - a.totalValue);
-    };
-    
+    let quotes = {}; if (allSymbols.length > 0) quotes = await getQuotes(allSymbols);
+    const getRankedUsers = (users) => { return users.map(user => { let stockValue = 0; if (user.stocks) user.stocks.forEach(stock => { stockValue += stock.shares * (quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice); }); return { ...user, totalValue: user.cash + stockValue }; }).sort((a, b) => b.totalValue - a.totalValue); };
     const globalRank = getRankedUsers(globalParticipants);
     let classRank = [];
-    
-    if (currentUser.role === 'teacher') {
-        classRank = globalRank.filter(user => user._id.toString() === currentUser.userId || (user.teacherId && user.teacherId === currentUser.userId));
-    } else {
-        const student = globalParticipants.find(u => u._id.toString() === currentUser.userId);
-        if (student && student.teacherId) {
-            classRank = globalRank.filter(user => (user.teacherId && user.teacherId === student.teacherId) || user._id.toString() === student.teacherId);
-        } else {
-            classRank = globalRank.filter(user => user._id.toString() === currentUser.userId);
-        }
-    }
-    
+    if (currentUser.role === 'teacher') { classRank = globalRank.filter(user => user._id.toString() === currentUser.userId || (user.teacherId && (user.teacherId.toString() === currentUser.userId || user.teacherId.toString() === currentUser.userId))); } 
+    else { const student = globalParticipants.find(u => u._id.toString() === currentUser.userId); if (student && student.teacherId) { const teacherIdStr = student.teacherId.toString(); classRank = globalRank.filter(user => (user.teacherId && user.teacherId.toString() === teacherIdStr) || user._id.toString() === teacherIdStr); } else { classRank = globalRank.filter(user => user._id.toString() === currentUser.userId); } }
     const userPortfolio = globalParticipants.find(u => u._id.toString() === currentUser.userId);
     const { analysis } = await getPortfolioAnalysis(currentUser.username, { cash: userPortfolio.cash, holdings: userPortfolio.stocks.map(s => ({ symbol: s.symbol, value: s.shares * (quotes[s.symbol] ? quotes[s.symbol].c : s.purchasePrice) })) });
-    
     return { globalRank, classRank, aiAnalysis: analysis };
 }
-
-async function markCompetitionFinished(collection, userId) {
-    await collection.updateOne({ _id: new ObjectId(userId) }, { $set: { activeCompetition: null, competitionEnded: false, isTradingPaused: false } });
-    return { success: true };
-}
-
+async function markCompetitionFinished(collection, userId) { await collection.updateOne({ _id: new ObjectId(userId) }, { $set: { activeCompetition: null, competitionEnded: false, isTradingPaused: false } }); return { success: true }; }
 
 // --- AI-POWERED FUNCTIONS (OPENAI) ---
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 async function intelligentSearch(query) {
-    let fmpResults = [];
-    try { fmpResults = await fmpApiCall('search', { query, limit: 5, exchange: 'NASDAQ,NYSE' }); } catch (error) { console.error("FMP search failed:", error); }
-    let combinedResults = (fmpResults || []).map(r => ({ symbol: r.symbol, description: r.name }));
-    if ((fmpResults.length < 2 || query.includes(' ')) && process.env.OPENAI_API_KEY) {
-        try {
-            const completion = await openai.chat.completions.create({ model: 'gpt-3.5-turbo', messages: [{ role: 'system', content: "You are a financial assistant. Based on the user's query (product, industry, concept, company name), list up to 5 relevant stock ticker symbols on major US exchanges, separated by commas. ONLY output the comma-separated symbols." }, { role: 'user', content: `Query: "${query}"` }], temperature: 0.1, max_tokens: 50, });
-            const aiSymbols = completion.choices[0].message.content.trim().toUpperCase().split(',').map(s => s.trim()).filter(Boolean);
-            if (aiSymbols.length > 0) {
-                const aiDetails = await Promise.all(aiSymbols.map(symbol => fmpApiCall('search', { query: symbol, limit: 1, exchange: 'NASDAQ,NYSE' })));
-                const aiFormattedResults = aiDetails.flat().filter(r => r && aiSymbols.includes(r.symbol)).map(r => ({ symbol: r.symbol, description: r.name }));
-                const uniqueSymbols = new Set(combinedResults.map(r => r.symbol));
-                aiFormattedResults.forEach(r => { if (!uniqueSymbols.has(r.symbol)) { combinedResults.push(r); uniqueSymbols.add(r.symbol); } });
-            }
-        } catch (aiError) { console.error("OpenAI search enhancement failed:", aiError); }
-    }
-    return combinedResults.slice(0, 10);
+    const completion = await openai.chat.completions.create({ model: 'gpt-3.5-turbo', messages: [{ role: 'system', content: "You are an expert financial assistant. A 4th-grade student is searching for a stock. Based on their query, identify the most likely single stock ticker symbol they are looking for. The stock must be on a major US exchange. Your response MUST be only the ticker symbol and nothing else." }, { role: 'user', content: `Query: "${query}"` }], temperature: 0, max_tokens: 10, });
+    const symbol = completion.choices[0].message.content.trim().toUpperCase().replace(/[^A-Z]/g, '');
+    if (!symbol) return [];
+    const data = await fmpApiCall('search', { query: symbol, limit: 1, exchange: 'NASDAQ,NYSE' });
+    return (data || []).map(r => ({ symbol: r.symbol, description: r.name }));
 }
 async function getCompanyExplanation(cacheCollection, companyName, symbol) {
     const cached = await cacheCollection.findOne({ symbol });

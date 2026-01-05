@@ -27,7 +27,7 @@ export default async function handler(req, res) {
         const { action, payload, token } = req.body;
         let userData;
 
-        const protectedActions = ['getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'toggleTradingStatus', 'getQuotes', 'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 'getLeaderboards', 'checkAndAwardAchievements', 'getStockIndustries'];
+        const protectedActions = ['getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'toggleTradingStatus', 'getQuotes', 'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 'getLeaderboards', 'checkAndAwardAchievements', 'getStockIndustries', 'createCompetition', 'getCompetitions', 'joinCompetition', 'getCompetitionWrapUp', 'markCompetitionFinished', 'resetClassCompetition'];
         
         if (protectedActions.includes(action)) {
             if (!token) throw new Error('Authentication token is required.');
@@ -59,7 +59,13 @@ export default async function handler(req, res) {
             case 'getPortfolioAnalysis': responseData = await getPortfolioAnalysis(userData.username, payload.portfolioSummary); break;
             case 'getLeaderboards': responseData = await getLeaderboards(db.collection('users'), userData); break;
             case 'checkAndAwardAchievements': responseData = await checkAndAwardAchievements(db, userData.userId); break;
-            case 'getStockIndustries': responseData = await getStockIndustries(payload.symbols); break;
+            case 'getStockIndustries': responseData = await getStockIndustries(payload.symbols); break; 
+            case 'createCompetition': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await createCompetition(db.collection('competitions'), { ...payload, creatorName: userData.username, creatorId: userData.userId }); break;
+            case 'getCompetitions': responseData = await getCompetitions(db.collection('competitions'), db.collection('users'), userData.userId); break;
+            case 'joinCompetition': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await joinCompetition(db.collection('users'), payload.competitionId, userData.userId); break;
+            case 'getCompetitionWrapUp': responseData = await getCompetitionWrapUp(db, payload.competitionId, userData); break;
+            case 'markCompetitionFinished': responseData = await markCompetitionFinished(db.collection('users'), userData.userId); break;
+            case 'resetClassCompetition': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await resetClassCompetition(db.collection('users'), userData.userId); break;
             default: throw new Error(`Unknown action: ${action}`);
         }
         
@@ -77,6 +83,7 @@ async function registerUser(collection, { username, password }) {
     if (!username || !password) throw new Error('Username and password are required.');
     if (password !== TEACHER_REGISTRATION_PASSWORD) throw new Error('Invalid registration password.');
     if (await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } })) throw new Error('Username already exists.');
+    
     const hashedPassword = await bcrypt.hash(password, 10);
     const role = 'teacher';
     await collection.insertOne({ username, hashedPassword, role, cash: 0, stocks: [], achievements: [], teacherId: null, activeCompetition: null, competitionEnded: false, lastSplitCheck: 0 });
@@ -133,7 +140,6 @@ async function getPortfolio(collection, userId) {
     const now = Date.now();
     // Check for splits if it's been more than 24 hours since last check (86400000 ms) or if never checked.
     if (!user.lastSplitCheck || (now - user.lastSplitCheck) > 86400000) {
-        let portfolioUpdated = false;
         if (user.stocks && user.stocks.length > 0) {
             for (const stock of user.stocks) {
                 // Get split history for this symbol
@@ -152,7 +158,6 @@ async function getPortfolio(collection, userId) {
                                 // Apply split math
                                 stock.shares = stock.shares * (numerator / denominator);
                                 stock.purchasePrice = stock.purchasePrice * (denominator / numerator);
-                                portfolioUpdated = true;
                                 console.log(`Applied ${numerator}:${denominator} split for ${stock.symbol} on user ${userId}`);
                             }
                         }
@@ -311,15 +316,75 @@ async function getCompetitionWrapUp(db, competitionId, currentUser) {
     return { globalRank, classRank, aiAnalysis: analysis };
 }
 async function markCompetitionFinished(collection, userId) { await collection.updateOne({ _id: new ObjectId(userId) }, { $set: { activeCompetition: null, competitionEnded: false, isTradingPaused: false } }); return { success: true }; }
+async function resetClassCompetition(collection, teacherId) {
+    const userIdsToUpdate = (await collection.find({ $or: [{ _id: new ObjectId(teacherId) }, { teacherId: teacherId }, { teacherId: new ObjectId(teacherId) }] }).project({_id: 1}).toArray()).map(u => u._id);
+    await collection.updateMany(
+        { _id: { $in: userIdsToUpdate } },
+        { $set: { activeCompetition: null, competitionEnded: false, isTradingPaused: false } }
+    );
+    return { success: true };
+}
 
 // --- AI-POWERED FUNCTIONS (OPENAI) ---
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 async function intelligentSearch(query) {
-    const completion = await openai.chat.completions.create({ model: 'gpt-3.5-turbo', messages: [{ role: 'system', content: "You are an expert financial assistant. A 4th-grade student is searching for a stock. Based on their query, identify the most likely single stock ticker symbol they are looking for. The stock must be on a major US exchange. Your response MUST be only the ticker symbol and nothing else." }, { role: 'user', content: `Query: "${query}"` }], temperature: 0, max_tokens: 10, });
-    const symbol = completion.choices[0].message.content.trim().toUpperCase().replace(/[^A-Z]/g, '');
-    if (!symbol) return [];
-    const data = await fmpApiCall('search', { query: symbol, limit: 1, exchange: 'NASDAQ,NYSE' });
-    return (data || []).map(r => ({ symbol: r.symbol, description: r.name }));
+    // 1. Direct FMP Search
+    let fmpResults = [];
+    try {
+        fmpResults = await fmpApiCall('search', { query, limit: 5, exchange: 'NASDAQ,NYSE' });
+    } catch (error) {
+        console.error("FMP search failed:", error);
+        // Don't throw, continue to AI search
+    }
+
+    // Prepare results in the desired format
+    let combinedResults = (fmpResults || []).map(r => ({ symbol: r.symbol, description: r.name }));
+
+    // 2. AI Search if FMP results are limited or query is conceptual
+    // Let's assume conceptual if query is multiple words or FMP returned < 2 results
+    if ((fmpResults.length < 2 || query.includes(' ')) && process.env.OPENAI_API_KEY) {
+        try {
+            const completion = await openai.chat.completions.create({
+                model: 'gpt-3.5-turbo',
+                messages: [
+                    { role: 'system', content: "You are a financial assistant. Based on the user's query (product, industry, concept, company name), list up to 5 relevant stock ticker symbols on major US exchanges, separated by commas. ONLY output the comma-separated symbols." },
+                    { role: 'user', content: `Query: "${query}"` }
+                ],
+                temperature: 0.1,
+                max_tokens: 50,
+            });
+
+            const aiSymbols = completion.choices[0].message.content.trim().toUpperCase().split(',').map(s => s.trim()).filter(Boolean);
+            
+            if (aiSymbols.length > 0) {
+                // Fetch details for AI symbols from FMP
+                const aiDetails = await Promise.all(
+                    aiSymbols.map(symbol => fmpApiCall('search', { query: symbol, limit: 1, exchange: 'NASDAQ,NYSE' }))
+                );
+                
+                // Flatten, filter, and format AI results
+                const aiFormattedResults = aiDetails
+                    .flat() // Flatten the array of arrays
+                    .filter(r => r && aiSymbols.includes(r.symbol)) // Ensure we only get the symbols AI suggested
+                    .map(r => ({ symbol: r.symbol, description: r.name }));
+
+                // Combine and deduplicate
+                const uniqueSymbols = new Set(combinedResults.map(r => r.symbol));
+                aiFormattedResults.forEach(r => {
+                    if (!uniqueSymbols.has(r.symbol)) {
+                        combinedResults.push(r);
+                        uniqueSymbols.add(r.symbol);
+                    }
+                });
+            }
+        } catch (aiError) {
+            console.error("OpenAI search enhancement failed:", aiError);
+            // Proceed with FMP results only
+        }
+    }
+
+    // Limit total results
+    return combinedResults.slice(0, 10);
 }
 async function getCompanyExplanation(cacheCollection, companyName, symbol) {
     const cached = await cacheCollection.findOne({ symbol });

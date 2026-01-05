@@ -11,33 +11,15 @@
     <style>
         body { font-family: 'Inter', sans-serif; }
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-        .modal-bg {
-            background-color: rgba(0, 0, 0, 0.5);
-        }
-        .chart-container {
-            position: relative;
-            height: 50vh;
-            width: 100%;
-        }
-        .time-range-btn.active {
-            background-color: #4f46e5;
-            color: white;
-        }
-        .tooltip {
-            visibility: hidden;
-            opacity: 0;
-            transition: opacity 0.3s;
-        }
-        .has-tooltip:hover .tooltip {
-            visibility: visible;
-            opacity: 1;
-        }
+        .modal-bg { background-color: rgba(0, 0, 0, 0.5); }
+        .chart-container { position: relative; height: 50vh; width: 100%; }
+        .time-range-btn.active { background-color: #4f46e5; color: white; }
+        .tooltip { visibility: hidden; opacity: 0; transition: opacity 0.3s; }
+        .has-tooltip:hover .tooltip { visibility: visible; opacity: 1; }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-800">
-    <div id="app" class="max-w-7xl mx-auto p-4">
-        <!-- App content will be rendered here by JavaScript -->
-    </div>
+    <div id="app" class="max-w-7xl mx-auto p-4"></div>
 
     <script>
         // --- CONFIGURATION ---
@@ -52,8 +34,6 @@
             MARKET_MASTER: { name: "Market Master", description: "Portfolio value reached $125,000.", svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-12 h-12"><path d="M13.5 4.06c0-1.336-1.616-2.005-2.56-1.06l-4.5 4.5H4.508c-1.141 0-2.318.664-2.66 1.905A9.76 9.76 0 001.5 12c0 .898.121 1.768.35 2.595.341 1.24 1.518 1.905 2.66 1.905H6.44l4.5 4.5c.944.945 2.56.276 2.56-1.06V4.06zM18.584 5.106a.75.75 0 011.06 0c3.808 3.807 3.808 9.98 0 13.788a.75.75 0 11-1.06-1.06 8.25 8.25 0 000-11.668.75.75 0 010-1.06z"></path><path d="M15.932 7.757a.75.75 0 011.061 0 6 6 0 010 8.486.75.75 0 01-1.06-1.061 4.5 4.5 0 000-6.364.75.75 0 010-1.06z"></path></svg>`}
         };
 
-
-        // --- API & DATA HANDLING ---
         async function callApi(action, payload = {}) {
             try {
                 const token = localStorage.getItem('sessionToken') || '';
@@ -78,7 +58,6 @@
             }
         }
 
-        // --- APPLICATION STATE & ROUTING ---
         const state = {
             currentPage: 'login',
             userData: null,
@@ -96,12 +75,16 @@
             render();
         }
 
-        // --- UI COMPONENTS & RENDERING ---
         const App = () => {
             const appContainer = document.getElementById('app');
             appContainer.innerHTML = '';
             
-            // ** Banner logic is removed from here **
+            if (state.portfolio.isTradingPaused) {
+                appContainer.innerHTML += `<div class="bg-yellow-200 text-yellow-800 text-center p-2 rounded-md mb-4 font-semibold">Trading is currently paused.</div>`;
+            } else if (state.portfolio.activeCompetition && !state.portfolio.competitionEnded) {
+                 appContainer.innerHTML += `<div id="competition-banner" class="bg-blue-100 text-blue-800 text-center p-2 rounded-md mb-4 font-semibold"></div>`;
+                 startCountdownTimer(state.portfolio.activeCompetition.endTime);
+            }
 
             switch (state.currentPage) {
                 case 'login': appContainer.innerHTML += LoginScreen(); attachLoginListeners(); break;
@@ -122,7 +105,7 @@
                         <span class="ml-4 text-sm text-gray-500">Welcome, ${state.userData.username}!</span>
                     </div>
                     <div>
-                        <button onclick="navigateTo('portfolio')" class="px-4 py-2 text-sm font-medium rounded-md hover:bg-gray-100">Portfolio</button>
+                        <button onclick="navigateTo('portfolio')" class="px-4 py-2 text-sm font-medium rounded-md hover:bg-gray-100">${isTeacher ? 'Manage Cash' : 'Portfolio'}</button>
                         <button onclick="navigateTo('trade')" class="px-4 py-2 text-sm font-medium rounded-md hover:bg-gray-100">Trade Stocks</button>
                         <button onclick="navigateTo('leaderboard')" class="px-4 py-2 text-sm font-medium rounded-md hover:bg-gray-100">Leaderboards</button>
                         <button onclick="navigateTo('competitions')" class="px-4 py-2 text-sm font-medium rounded-md hover:bg-gray-100">Competitions</button>
@@ -136,9 +119,9 @@
         function LoginScreen() { return `<div class="min-h-screen flex items-center justify-center"><div class="bg-white p-8 rounded-lg shadow-lg w-full max-w-md"><h2 class="text-2xl font-bold mb-6 text-center text-gray-800">Welcome!</h2><div class="flex border-b mb-6"><button id="login-tab" class="flex-1 py-2 text-center font-semibold text-indigo-600 border-b-2 border-indigo-600">Sign In</button><button id="signup-tab" class="flex-1 py-2 text-center font-semibold text-gray-500">New Teacher Registration</button></div><form id="login-form" class="space-y-4"><div><label for="login-username" class="block text-sm font-medium text-gray-700">Username</label><input type="text" id="login-username" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></div><div><label for="login-password" class="block text-sm font-medium text-gray-700">Password</label><input type="password" id="login-password" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></div><button type="submit" class="w-full bg-indigo-600 text-white py-2 px-4 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">Sign In</button></form><form id="signup-form" class="hidden space-y-4"><div><label for="signup-username" class="block text-sm font-medium text-gray-700">Teacher Username</label><input type="text" id="signup-username" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></div><div><label for="signup-password" class="block text-sm font-medium text-gray-700">Registration Password</label><input type="password" id="signup-password" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="Enter the teacher registration password"></div><button type="submit" class="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">Register Teacher Account</button></form><div id="message-area" class="mt-4 text-center text-red-500"></div></div></div>`; }
         function PortfolioScreen() { return `<div id="portfolio-content" class="space-y-6"><div id="portfolio-loader" class="text-center">Loading portfolio...</div></div><div id="achievements-section" class="mt-8"></div><div id="news-feed" class="mt-8"></div><div id="modal-container"></div>`; }
         function TradeScreen() { return `<div class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-2xl font-bold mb-4">Trade Stocks</h2><div class="flex space-x-2"><input type="text" id="search-input" placeholder="Search for 'iPhone', 'electric cars', etc..." class="flex-grow px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"><button id="search-button" class="bg-indigo-600 text-white px-6 py-2 rounded-md hover:bg-indigo-700">Search</button></div><div id="search-results" class="mt-6"></div><div id="trade-news-feed" class="mt-8"></div></div><div id="modal-container"></div>`; }
-        function RosterScreen() { return `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">Student Roster</h2><button id="add-student-btn" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm">Add Student</button></div><div id="roster-list" class="space-y-2"></div></div><div id="modal-container"></div>`; }
+        function RosterScreen() { return `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">Student Roster</h2><div><button onclick="resetClassCompetition()" class="bg-yellow-600 text-white px-4 py-2 rounded-md hover:bg-yellow-700 text-sm mr-2">Reset Class Status</button><button id="add-student-btn" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm">Add Student</button></div></div><div id="class-trading-controls"></div><div id="roster-list" class="space-y-2"></div></div><div id="modal-container"></div>`; }
         function LeaderboardScreen() { return `<div class="bg-white p-6 rounded-lg shadow-md"><h2 class="text-2xl font-bold mb-6 text-center">Leaderboards</h2><div class="flex border-b mb-6"><button id="class-leaderboard-tab" class="flex-1 py-2 text-center font-semibold text-indigo-600 border-b-2 border-indigo-600">My Class</button><button id="global-leaderboard-tab" class="flex-1 py-2 text-center font-semibold text-gray-500">Global</button></div><div id="leaderboard-content"><div id="leaderboard-loader" class="text-center">Loading leaderboard...</div></div></div>`; }
-        function CompetitionScreen() { const isTeacher = state.userData.role === 'teacher'; return `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">Competitions</h2>${isTeacher ? `<button id="create-competition-btn" onclick="openCreateCompetitionModal()" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm">Create Competition</button>` : ''}</div><div id="competition-list" class="space-y-4">Loading competitions...</div></div><div id="modal-container"></div>`; }
+        function CompetitionScreen() { const isTeacher = state.userData.role === 'teacher'; return `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">Competitions</h2>${isTeacher ? `<button id="create-competition-btn" onclick="openCreateCompetitionModal()" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 text-sm">Create Competition</button>` : ''}</div><div id="competition-list" class="space-y-4">Loading competitions...</div></div>`; }
         function showMessage(msg, isError = true) { const el = document.getElementById('message-area'); if(el) { el.textContent = msg; el.className = isError ? 'mt-4 text-center text-red-500' : 'mt-4 text-center text-green-500'; } }
         function renderModal(content) { const el = document.getElementById('modal-container'); if(el) { el.innerHTML = `<div class="fixed inset-0 modal-bg flex items-center justify-center z-50"><div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl relative"><button onclick="closeModal()" class="absolute top-2 right-2 text-gray-500 hover:text-gray-800 text-2xl">&times;</button>${content}</div></div>`; } }
         function closeModal() { const el = document.getElementById('modal-container'); if(el) el.innerHTML = ''; if (state.currentChart.instance) { state.currentChart.instance.destroy(); state.currentChart = { instance: null, data: null }; } }
@@ -189,6 +172,22 @@
             } catch (error) { document.getElementById('wrap-up-content').innerHTML = `<p class="text-red-500">Could not load results.</p>`; }
         }
 
+        async function resetClassCompetition() {
+            if (confirm('Are you sure you want to reset the competition status for your ENTIRE class? This will unpause all students and clear their competition history.')) {
+                try {
+                    await callApi('resetClassCompetition');
+                    alert('Class competition status reset successfully.');
+                    // Refresh the roster to show the updated status
+                    const roster = await callApi('getStudentRoster');
+                    state.studentRoster = roster;
+                    renderRoster();
+                    renderClassTradingControls();
+                } catch (error) {
+                    alert(`Error: ${error.message}`);
+                }
+            }
+        }
+
         // --- EVENT LISTENERS & LOGIC ---
         function attachLoginListeners() {
             const loginForm = document.getElementById('login-form'), signupForm = document.getElementById('signup-form');
@@ -201,7 +200,6 @@
         
         async function attachPortfolioListeners() {
             const contentDiv = document.getElementById('portfolio-content');
-            const appContainer = document.getElementById('app');
             try {
                 const portfolioData = await callApi('getPortfolio');
                 state.portfolio.cash = portfolioData.cash;
@@ -211,9 +209,15 @@
                 state.portfolio.isTradingPaused = portfolioData.isTradingPaused || false;
                 state.portfolio.competitionEnded = portfolioData.competitionEnded || false;
 
-                // --- THE FIX: BANNER LOGIC MOVED HERE ---
-                const navbar = appContainer.querySelector('nav');
+                // Check for banner
+                const navbar = document.querySelector('nav');
                 if (navbar) {
+                    // Clean up any old banners first
+                    const existingBanner = document.getElementById('competition-banner');
+                    if (existingBanner) existingBanner.remove();
+                    const existingPaused = document.querySelector('.bg-yellow-200');
+                    if (existingPaused) existingPaused.remove();
+
                     if (state.portfolio.isTradingPaused) {
                         navbar.insertAdjacentHTML('afterend', `<div class="bg-yellow-200 text-yellow-800 text-center p-2 rounded-md mb-4 font-semibold">Trading is currently paused.</div>`);
                     } else if (state.portfolio.activeCompetition && !state.portfolio.competitionEnded) {
@@ -221,7 +225,6 @@
                         startCountdownTimer(state.portfolio.activeCompetition.endTime);
                     }
                 }
-                // --- END OF FIX ---
 
                 if (state.portfolio.competitionEnded && !state.portfolio.isTradingPaused) showWrapUpModal(state.portfolio.activeCompetition);
                 let symbols = state.portfolio.stocks.map(s => s.symbol);
@@ -246,7 +249,7 @@
             let totalValue = state.portfolio.cash;
             sortedStocks.forEach(s => totalValue += s.totalValue);
             const teacherCashControls = isTeacher ? `<div class="mt-2 flex justify-center space-x-2"><button class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-md hover:bg-green-200" onclick="openAdjustTeacherCashModal('add')">Add Cash</button><button class="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-md hover:bg-red-200" onclick="openAdjustTeacherCashModal('remove')">Remove Cash</button></div>` : '';
-            const stockRows = sortedStocks.map(stock => { const { symbol, shares, purchasePrice, currentPrice, totalValue, gainLoss } = stock; const purchaseValue = shares * purchasePrice; const gainLossPercent = purchaseValue !== 0 ? (gainLoss / purchaseValue) * 100 : 0; const gainLossColor = gainLoss >= 0 ? 'text-green-600' : 'text-red-600'; return `<tr class="border-b"><td class="py-3 px-4 font-medium">${symbol}</td><td class="py-3 px-4">${shares}</td><td class="py-3 px-4">$${purchasePrice.toFixed(2)}</td><td class="py-3 px-4">$${currentPrice.toFixed(2)}</td><td class="py-3 px-4">$${totalValue.toFixed(2)}</td><td class="py-3 px-4 ${gainLossColor}">$${gainLoss.toFixed(2)} (${gainLossPercent.toFixed(2)}%)</td><td class="py-3 px-4"><button class="text-indigo-600 hover:underline" onclick="showChart('${symbol}')">View Chart</button></td></tr>`; }).join('');
+            const stockRows = sortedStocks.map(stock => { const { symbol, shares, purchasePrice, currentPrice, totalValue, gainLoss } = stock; const purchaseValue = shares * purchasePrice; const gainLossPercent = purchaseValue !== 0 ? (gainLoss / purchaseValue) * 100 : 0; const gainLossColor = gainLoss >= 0 ? 'text-green-600' : 'text-red-600'; return `<tr class="border-b"><td class="py-3 px-4 font-medium">${symbol}</td><td class="py-3 px-4">${shares}</td><td class="py-3 px-4">$${purchasePrice.toFixed(2)}</td><td class="py-3 px-4">$${stock.currentPrice.toFixed(2)}</td><td class="py-3 px-4">$${totalValue.toFixed(2)}</td><td class="py-3 px-4 ${gainLossColor}">$${gainLoss.toFixed(2)} (${gainLossPercent.toFixed(2)}%)</td><td class="py-3 px-4"><button class="text-indigo-600 hover:underline" onclick="showChart('${symbol}')">View Chart</button></td></tr>`; }).join('');
             const donutChartCanvas = (state.portfolio.stocks.length > 0) ? `<div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500 mb-2">Diversification</h3><div style="position: relative; height:120px"><canvas id="portfolioDonutChart"></canvas></div></div>` : `<div class="bg-gray-100 p-4 rounded-lg flex items-center justify-center"><p class="text-sm text-gray-500">Buy stocks to see your diversification.</p></div>`;
             contentDiv.innerHTML = `<div class="bg-white p-6 rounded-lg shadow-md"><div class="flex justify-between items-center mb-4"><h2 class="text-2xl font-bold">My Portfolio</h2><button id="ai-analysis-btn" class="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 text-sm">✨ Get AI Portfolio Analysis</button></div><div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-center mb-6"><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Total Value</h3><p class="text-2xl font-semibold">$${totalValue.toFixed(2)}</p></div><div class="bg-gray-100 p-4 rounded-lg"><h3 class="text-sm font-medium text-gray-500">Cash Balance</h3><p id="cash-balance-display" class="text-2xl font-semibold">$${state.portfolio.cash.toFixed(2)}</p>${teacherCashControls}</div>${donutChartCanvas}</div><div class="overflow-x-auto"><table class="w-full text-sm text-left"><thead class="bg-gray-50"><tr><th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('symbol')">Symbol${sortArrow('symbol')}</th><th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('shares')">Shares${sortArrow('shares')}</th><th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('purchasePrice')">Avg. Purchase Price${sortArrow('purchasePrice')}</th><th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('currentPrice')">Current Price${sortArrow('currentPrice')}</th><th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('totalValue')">Total Value${sortArrow('totalValue')}</th><th class="py-3 px-4 font-semibold cursor-pointer" onclick="sortPortfolio('gainLoss')">Gain/Loss${sortArrow('gainLoss')}</th><th class="py-3 px-4 font-semibold">Actions</th></tr></thead><tbody>${stockRows.length > 0 ? stockRows : `<tr><td colspan="7" class="text-center py-4">You don't own any stocks yet. Go to the Trade page to buy some!</td></tr>`}</tbody></table></div></div>`;
             document.getElementById('ai-analysis-btn').addEventListener('click', getPortfolioAnalysis);
@@ -316,14 +319,63 @@
                 const roster = await callApi('getStudentRoster');
                 state.studentRoster = roster;
                 renderRoster();
+                renderClassTradingControls();
             } catch (error) { rosterDiv.innerHTML = `<div class="text-red-500">Could not load roster.</div>`; }
         }
 
         function renderRoster() {
             const rosterDiv = document.getElementById('roster-list');
             if(state.studentRoster.length === 0) { rosterDiv.innerHTML = `<div class="p-3 text-center">You haven't added any students yet.</div>`; return; }
-            const rosterItems = state.studentRoster.map(student => `<div class="grid grid-cols-5 items-center p-3 border-b"><span>${student.username}</span><span>$${student.cash.toFixed(2)}</span><div><button class="text-sm text-green-600 hover:underline" onclick="openAdjustCashModal('${student._id}', '${student.username}', ${student.cash}, 'add')">Add Cash</button><button class="text-sm text-red-600 hover:underline ml-2" onclick="openAdjustCashModal('${student._id}', '${student.username}', ${student.cash}, 'remove')">Remove Cash</button></div><div class="text-right"><button class="text-sm text-indigo-600 hover:underline" onclick="openEditStudentModal('${student._id}', '${student.username}')">Edit</button></div><div class="text-right"><button class="text-sm text-red-500 hover:underline" onclick="removeStudent('${student._id}', '${student.username}')">Remove</button></div></div>`).join('');
-            rosterDiv.innerHTML = `<div class="grid grid-cols-5 p-3 font-semibold bg-gray-50"><span>Username</span><span>Cash Balance</span><span>Adjust Cash</span><span class="text-right"></span><span class="text-right">Actions</span></div>` + rosterItems;
+            const rosterItems = state.studentRoster.map(student => {
+                const tradingStatusText = student.isTradingPaused ? 'Resume' : 'Pause';
+                const tradingStatusClasses = student.isTradingPaused ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700';
+                return `<div class="grid grid-cols-6 items-center p-3 border-b"><span>${student.username}</span><span>$${student.cash.toFixed(2)}</span><div><button class="text-sm text-green-600 hover:underline" onclick="openAdjustCashModal('${student._id}', '${student.username}', ${student.cash}, 'add')">Add</button> / <button class="text-sm text-red-600 hover:underline" onclick="openAdjustCashModal('${student._id}', '${student.username}', ${student.cash}, 'remove')">Remove</button></div><div class="text-center"><button class="text-sm px-2 py-1 rounded-md ${tradingStatusClasses}" onclick="toggleStudentTrading('${student._id}', ${!student.isTradingPaused})">${tradingStatusText}</button></div><div class="text-right"><button class="text-sm text-indigo-600 hover:underline" onclick="openEditStudentModal('${student._id}', '${student.username}')">Edit</button></div><div class="text-right"><button class="text-sm text-red-500 hover:underline" onclick="removeStudent('${student._id}', '${student.username}')">Remove</button></div></div>`;
+            }).join('');
+            rosterDiv.innerHTML = `<div class="grid grid-cols-6 p-3 font-semibold bg-gray-50"><span>Username</span><span>Cash</span><span>Adjust Cash</span><span class="text-center">Trading</span><span class="text-right"></span><span class="text-right">Actions</span></div>` + rosterItems;
+        }
+
+        function renderClassTradingControls() {
+            const controlsDiv = document.getElementById('class-trading-controls');
+            const allPaused = state.studentRoster.length > 0 && state.studentRoster.every(s => s.isTradingPaused);
+            const buttonText = allPaused ? 'Resume All Trading' : 'Pause All Trading';
+            const buttonClasses = allPaused ? 'bg-green-600 hover:bg-green-700' : 'bg-yellow-500 hover:bg-yellow-600';
+            controlsDiv.innerHTML = `
+                <div class="flex space-x-2">
+                    <button class="${buttonClasses} text-white px-4 py-2 rounded-md text-sm" onclick="toggleStudentTrading(null, ${!allPaused})">${buttonText}</button>
+                    <button class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md text-sm" onclick="resetClassCompetition()">Reset Class Status</button>
+                </div>
+            `;
+        }
+
+        async function toggleStudentTrading(studentId, isPaused) {
+            try {
+                const { updatedStudents } = await callApi('toggleTradingStatus', { studentId, isPaused });
+                // Update the local roster state
+                updatedStudents.forEach(updated => {
+                    const student = state.studentRoster.find(s => s._id === updated._id);
+                    if (student) student.isTradingPaused = updated.isTradingPaused;
+                });
+                renderRoster();
+                renderClassTradingControls();
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        }
+
+        async function resetClassCompetition() {
+            if (confirm('Are you sure you want to reset the competition status for your ENTIRE class? This will unpause all students and clear their competition history.')) {
+                try {
+                    await callApi('resetClassCompetition');
+                    alert('Class competition status reset successfully.');
+                    // Refresh the roster to show the updated status
+                    const roster = await callApi('getStudentRoster');
+                    state.studentRoster = roster;
+                    renderRoster();
+                    renderClassTradingControls();
+                } catch (error) {
+                    alert(`Error: ${error.message}`);
+                }
+            }
         }
 
         function openAddStudentModal() {
@@ -429,7 +481,6 @@
         
         // --- COMPETITION LISTENERS ---
         async function attachCompetitionListeners() {
-            // This function now just loads the list. The button click is handled by 'onclick' in the HTML.
             await renderCompetitionList();
         }
 
@@ -536,7 +587,26 @@
         function logout() { localStorage.removeItem('sessionToken'); state.userData = null; navigateTo('login'); }
         async function init() { const token = localStorage.getItem('sessionToken'); if (token) { try { const data = await callApi('validateSession'); state.userData = data; navigateTo('portfolio'); } catch (error) { logout(); } } else { navigateTo('login'); } }
         
-        window.navigateTo = navigateTo; window.logout = logout; window.openTradeModal = openTradeModal; window.closeModal = closeModal; window.showChart = showChart; window.simplifyNews = simplifyNews; window.getCompanyExplanation = getCompanyExplanation; window.openAddStudentModal = openAddStudentModal; window.openAdjustCashModal = openAdjustCashModal; window.removeStudent = removeStudent; window.updateChart = updateChart; window.openAdjustTeacherCashModal = openAdjustTeacherCashModal; window.openEditStudentModal = openEditStudentModal; window.joinCompetition = joinCompetition; window.openCreateCompetitionModal = openCreateCompetitionModal; window.sortPortfolio = sortPortfolio;
+        // --- GLOBAL EVENT HANDLER ---
+        // Necessary for dynamically added elements
+        window.navigateTo = navigateTo;
+        window.logout = logout;
+        window.openTradeModal = openTradeModal;
+        window.closeModal = closeModal;
+        window.showChart = showChart;
+        window.simplifyNews = simplifyNews;
+        window.getCompanyExplanation = getCompanyExplanation;
+        window.openAddStudentModal = openAddStudentModal;
+        window.openAdjustCashModal = openAdjustCashModal;
+        window.removeStudent = removeStudent;
+        window.updateChart = updateChart;
+        window.openAdjustTeacherCashModal = openAdjustTeacherCashModal;
+        window.openEditStudentModal = openEditStudentModal;
+        window.joinCompetition = joinCompetition;
+        window.openCreateCompetitionModal = openCreateCompetitionModal; // This line was the fix
+        window.sortPortfolio = sortPortfolio;
+        window.toggleStudentTrading = toggleStudentTrading;
+        window.resetClassCompetition = resetClassCompetition;
         
         init();
         function render() { App(); }

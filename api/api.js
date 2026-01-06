@@ -27,7 +27,16 @@ export default async function handler(req, res) {
         const { action, payload, token } = req.body;
         let userData;
 
-        const protectedActions = ['getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'toggleTradingStatus', 'getQuotes', 'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 'getLeaderboards', 'checkAndAwardAchievements', 'getStockIndustries', 'createCompetition', 'getCompetitions', 'joinCompetition', 'getCompetitionWrapUp', 'markCompetitionFinished', 'resetClassCompetition'];
+        const protectedActions = [
+            'getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 
+            'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'getQuotes', 
+            'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 
+            'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 
+            'getLeaderboards', 'checkAndAwardAchievements', 'getStockIndustries', 
+            'createCompetition', 'getCompetitions', 'joinCompetition', 
+            'getCompetitionWrapUp', 'markCompetitionFinished', 'resetClassCompetition', 
+            'toggleTradingStatus', 'deleteCompetition', 'leaveCompetition'
+        ];
         
         if (protectedActions.includes(action)) {
             if (!token) throw new Error('Authentication token is required.');
@@ -59,10 +68,12 @@ export default async function handler(req, res) {
             case 'getPortfolioAnalysis': responseData = await getPortfolioAnalysis(userData.username, payload.portfolioSummary); break;
             case 'getLeaderboards': responseData = await getLeaderboards(db.collection('users'), userData); break;
             case 'checkAndAwardAchievements': responseData = await checkAndAwardAchievements(db, userData.userId); break;
-            case 'getStockIndustries': responseData = await getStockIndustries(payload.symbols); break; 
+            case 'getStockIndustries': responseData = await getStockIndustries(payload.symbols); break;
             case 'createCompetition': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await createCompetition(db.collection('competitions'), { ...payload, creatorName: userData.username, creatorId: userData.userId }); break;
             case 'getCompetitions': responseData = await getCompetitions(db.collection('competitions'), db.collection('users'), userData.userId); break;
-            case 'joinCompetition': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await joinCompetition(db.collection('users'), payload.competitionId, userData.userId); break;
+            case 'joinCompetition': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await joinCompetition(db.collection('users'), db.collection('competitions'), payload.competitionId, userData.userId); break;
+            case 'leaveCompetition': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await leaveCompetition(db.collection('users'), db.collection('competitions'), payload.competitionId, userData.userId); break;
+            case 'deleteCompetition': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await deleteCompetition(db.collection('competitions'), db.collection('users'), payload.competitionId, userData.userId); break;
             case 'getCompetitionWrapUp': responseData = await getCompetitionWrapUp(db, payload.competitionId, userData); break;
             case 'markCompetitionFinished': responseData = await markCompetitionFinished(db.collection('users'), userData.userId); break;
             case 'resetClassCompetition': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await resetClassCompetition(db.collection('users'), userData.userId); break;
@@ -292,12 +303,32 @@ async function getCompetitions(compCollection, usersCollection, userId) {
     const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
     return { competitions, userCompetitionId: user.activeCompetition ? user.activeCompetition._id : null };
 }
-async function joinCompetition(usersCollection, competitionId, teacherId) {
-    const competition = await connectToDatabase().then(db => db.collection('competitions').findOne({ _id: new ObjectId(competitionId) }));
+async function joinCompetition(usersCollection, compCollection, competitionId, teacherId) {
+    const competition = await compCollection.findOne({ _id: new ObjectId(competitionId) });
     if (!competition) throw new Error("Competition not found.");
     const userIdsToUpdate = (await usersCollection.find({ $or: [{ _id: new ObjectId(teacherId) }, { teacherId: teacherId }, { teacherId: new ObjectId(teacherId) }] }).project({_id: 1}).toArray()).map(u => u._id);
     await usersCollection.updateMany({ _id: { $in: userIdsToUpdate } }, { $set: { activeCompetition: competition, isTradingPaused: false, competitionEnded: false } });
-    await connectToDatabase().then(db => db.collection('competitions').updateOne({ _id: competition._id }, { $addToSet: { participants: { $each: userIdsToUpdate } } }));
+    await compCollection.updateOne({ _id: competition._id }, { $addToSet: { participants: { $each: userIdsToUpdate } } });
+    return { success: true };
+}
+async function leaveCompetition(usersCollection, compCollection, competitionId, teacherId) {
+    const competition = await compCollection.findOne({ _id: new ObjectId(competitionId) });
+    if (!competition) throw new Error("Competition not found.");
+    const userIdsToUpdate = (await usersCollection.find({ $or: [{ _id: new ObjectId(teacherId) }, { teacherId: teacherId }, { teacherId: new ObjectId(teacherId) }] }).project({_id: 1}).toArray()).map(u => u._id);
+    await usersCollection.updateMany({ _id: { $in: userIdsToUpdate } }, { $set: { activeCompetition: null, isTradingPaused: false, competitionEnded: false } });
+    await compCollection.updateOne({ _id: competition._id }, { $pull: { participants: { $in: userIdsToUpdate } } });
+    return { success: true };
+}
+async function deleteCompetition(compCollection, usersCollection, competitionId, teacherId) {
+    const competition = await compCollection.findOne({ _id: new ObjectId(competitionId) });
+    if (!competition) throw new Error("Competition not found.");
+    if (competition.creatorId.toString() !== teacherId) throw new Error("Only the creator can delete this competition.");
+    await compCollection.deleteOne({ _id: new ObjectId(competitionId) });
+    // Remove competition from all users who had it active
+    await usersCollection.updateMany(
+        { "activeCompetition._id": new ObjectId(competitionId) },
+        { $set: { activeCompetition: null, isTradingPaused: false, competitionEnded: false } }
+    );
     return { success: true };
 }
 async function getCompetitionWrapUp(db, competitionId, currentUser) {
@@ -328,62 +359,21 @@ async function resetClassCompetition(collection, teacherId) {
 // --- AI-POWERED FUNCTIONS (OPENAI) ---
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 async function intelligentSearch(query) {
-    // 1. Direct FMP Search
     let fmpResults = [];
-    try {
-        fmpResults = await fmpApiCall('search', { query, limit: 5, exchange: 'NASDAQ,NYSE' });
-    } catch (error) {
-        console.error("FMP search failed:", error);
-        // Don't throw, continue to AI search
-    }
-
-    // Prepare results in the desired format
+    try { fmpResults = await fmpApiCall('search', { query, limit: 5, exchange: 'NASDAQ,NYSE' }); } catch (error) { console.error("FMP search failed:", error); }
     let combinedResults = (fmpResults || []).map(r => ({ symbol: r.symbol, description: r.name }));
-
-    // 2. AI Search if FMP results are limited or query is conceptual
-    // Let's assume conceptual if query is multiple words or FMP returned < 2 results
     if ((fmpResults.length < 2 || query.includes(' ')) && process.env.OPENAI_API_KEY) {
         try {
-            const completion = await openai.chat.completions.create({
-                model: 'gpt-3.5-turbo',
-                messages: [
-                    { role: 'system', content: "You are a financial assistant. Based on the user's query (product, industry, concept, company name), list up to 5 relevant stock ticker symbols on major US exchanges, separated by commas. ONLY output the comma-separated symbols." },
-                    { role: 'user', content: `Query: "${query}"` }
-                ],
-                temperature: 0.1,
-                max_tokens: 50,
-            });
-
+            const completion = await openai.chat.completions.create({ model: 'gpt-3.5-turbo', messages: [{ role: 'system', content: "You are a financial assistant. Based on the user's query (product, industry, concept, company name), list up to 5 relevant stock ticker symbols on major US exchanges, separated by commas. ONLY output the comma-separated symbols." }, { role: 'user', content: `Query: "${query}"` }], temperature: 0.1, max_tokens: 50, });
             const aiSymbols = completion.choices[0].message.content.trim().toUpperCase().split(',').map(s => s.trim()).filter(Boolean);
-            
             if (aiSymbols.length > 0) {
-                // Fetch details for AI symbols from FMP
-                const aiDetails = await Promise.all(
-                    aiSymbols.map(symbol => fmpApiCall('search', { query: symbol, limit: 1, exchange: 'NASDAQ,NYSE' }))
-                );
-                
-                // Flatten, filter, and format AI results
-                const aiFormattedResults = aiDetails
-                    .flat() // Flatten the array of arrays
-                    .filter(r => r && aiSymbols.includes(r.symbol)) // Ensure we only get the symbols AI suggested
-                    .map(r => ({ symbol: r.symbol, description: r.name }));
-
-                // Combine and deduplicate
+                const aiDetails = await Promise.all(aiSymbols.map(symbol => fmpApiCall('search', { query: symbol, limit: 1, exchange: 'NASDAQ,NYSE' })));
+                const aiFormattedResults = aiDetails.flat().filter(r => r && aiSymbols.includes(r.symbol)).map(r => ({ symbol: r.symbol, description: r.name }));
                 const uniqueSymbols = new Set(combinedResults.map(r => r.symbol));
-                aiFormattedResults.forEach(r => {
-                    if (!uniqueSymbols.has(r.symbol)) {
-                        combinedResults.push(r);
-                        uniqueSymbols.add(r.symbol);
-                    }
-                });
+                aiFormattedResults.forEach(r => { if (!uniqueSymbols.has(r.symbol)) { combinedResults.push(r); uniqueSymbols.add(r.symbol); } });
             }
-        } catch (aiError) {
-            console.error("OpenAI search enhancement failed:", aiError);
-            // Proceed with FMP results only
-        }
+        } catch (aiError) { console.error("OpenAI search enhancement failed:", aiError); }
     }
-
-    // Limit total results
     return combinedResults.slice(0, 10);
 }
 async function getCompanyExplanation(cacheCollection, companyName, symbol) {

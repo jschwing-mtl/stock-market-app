@@ -11,8 +11,7 @@ async function connectToDatabase() {
     if (!uri) throw new Error('MONGODB_URI is not defined.');
     const client = new MongoClient(uri);
     await client.connect();
-    // Explicitly select the correct database
-    const db = client.db('stock-market-app'); 
+    const db = client.db('stock-market-app');
     cachedDb = db;
     return db;
 }
@@ -30,13 +29,13 @@ export default async function handler(req, res) {
 
         const protectedActions = [
             'getPortfolio', 'executeTrade', 'getStudentRoster', 'addStudent', 'removeStudent', 
-            'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'getQuotes', 
-            'getCompanyNews', 'simplifyNews', 'setCachedNews', 'intelligentSearch', 
-            'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 'validateSession', 
-            'getLeaderboards', 'checkAndAwardAchievements', 'getStockIndustries', 
+            'updateStudentCash', 'updateTeacherCash', 'updateStudentCredentials', 'resetPortfolio', // Added resetPortfolio
+            'toggleTradingStatus', 'getQuotes', 'getCompanyNews', 'simplifyNews', 'setCachedNews', 
+            'intelligentSearch', 'getCompanyExplanation', 'getPortfolioAnalysis', 'getChartData', 
+            'validateSession', 'getLeaderboards', 'checkAndAwardAchievements', 'getStockIndustries', 
             'createCompetition', 'getCompetitions', 'joinCompetition', 
             'getCompetitionWrapUp', 'markCompetitionFinished', 'resetClassCompetition', 
-            'toggleTradingStatus', 'deleteCompetition', 'leaveCompetition', 'getPublicPortfolio'
+            'deleteCompetition', 'leaveCompetition', 'getPublicPortfolio'
         ];
         
         if (protectedActions.includes(action)) {
@@ -56,6 +55,7 @@ export default async function handler(req, res) {
             case 'updateStudentCash': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await updateStudentCash(db.collection('users'), payload.studentId, payload.amount, userData.userId); break;
             case 'updateTeacherCash': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await updateTeacherCash(db.collection('users'), userData.userId, payload.amount); break;
             case 'updateStudentCredentials': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await updateStudentCredentials(db.collection('users'), payload.studentId, userData.userId, payload.newUsername, payload.newPassword); break;
+            case 'resetPortfolio': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await resetPortfolio(db.collection('users'), payload.targetUserId, userData.userId); break;
             case 'toggleTradingStatus': if (userData.role !== 'teacher') throw new Error('Access Denied'); responseData = await toggleTradingStatus(db.collection('users'), payload.studentId, payload.isPaused, userData.userId); break;
             case 'getPortfolio': responseData = await getPortfolio(db.collection('users'), userData.userId); break;
             case 'executeTrade': responseData = await executeTrade(db.collection('users'), userData.userId, payload); break;
@@ -96,7 +96,6 @@ async function registerUser(collection, { username, password }) {
     if (!username || !password) throw new Error('Username and password are required.');
     if (password !== TEACHER_REGISTRATION_PASSWORD) throw new Error('Invalid registration password.');
     if (await collection.findOne({ username: { $regex: new RegExp(`^${username}$`, 'i') } })) throw new Error('Username already exists.');
-    
     const hashedPassword = await bcrypt.hash(password, 10);
     const role = 'teacher';
     await collection.insertOne({ username, hashedPassword, role, cash: 0, stocks: [], achievements: [], teacherId: null, activeCompetition: null, competitionEnded: false, lastSplitCheck: 0 });
@@ -143,6 +142,30 @@ async function toggleTradingStatus(collection, studentId, isPaused, teacherId) {
     const updatedStudents = await collection.find(filter).project({_id: 1, isTradingPaused: 1}).toArray();
     return { success: true, updatedStudents };
 }
+async function resetPortfolio(collection, targetUserId, teacherId) {
+    // Verify permission: Allow if it's the teacher resetting themselves, or a teacher resetting a student in their roster
+    const isSelfReset = targetUserId === teacherId;
+    let query = { _id: new ObjectId(targetUserId) };
+    
+    if (!isSelfReset) {
+        // If resetting a student, ensure the student belongs to the teacher
+        query.$or = [{ teacherId: teacherId }, { teacherId: new ObjectId(teacherId) }];
+    }
+
+    const result = await collection.updateOne(query, { 
+        $set: { 
+            cash: 100000, 
+            stocks: [], 
+            achievements: [], 
+            activeCompetition: null, 
+            competitionEnded: false,
+            isTradingPaused: false 
+        } 
+    });
+
+    if (result.matchedCount === 0) throw new Error('User not found or permission denied.');
+    return { success: true };
+}
 
 // --- PORTFOLIO & TRADING ---
 async function getPortfolio(collection, userId) {
@@ -151,37 +174,28 @@ async function getPortfolio(collection, userId) {
 
     // --- STOCK SPLIT CHECK LOGIC ---
     const now = Date.now();
-    // Check for splits if it's been more than 24 hours since last check (86400000 ms) or if never checked.
     if (!user.lastSplitCheck || (now - user.lastSplitCheck) > 86400000) {
         if (user.stocks && user.stocks.length > 0) {
             for (const stock of user.stocks) {
-                // Get split history for this symbol
                 try {
                     const splits = await fmpApiCall(`historical-price-full/stock_split/${stock.symbol}`);
                     if (splits && splits.historical) {
                         for (const split of splits.historical) {
-                            const splitDate = new Date(split.date).getTime() / 1000; // seconds
-                            // If split happened AFTER purchase AND AFTER last check (or if never checked)
-                            // Use 0 as default lastSplitCheck to catch all historical splits for new fixes
+                            const splitDate = new Date(split.date).getTime() / 1000;
                             const lastCheckTime = user.lastSplitCheck ? user.lastSplitCheck / 1000 : 0;
-                            
                             if (splitDate > stock.purchaseDate && splitDate > lastCheckTime) {
                                 const numerator = split.numerator;
                                 const denominator = split.denominator;
-                                // Apply split math
                                 stock.shares = stock.shares * (numerator / denominator);
                                 stock.purchasePrice = stock.purchasePrice * (denominator / numerator);
-                                console.log(`Applied ${numerator}:${denominator} split for ${stock.symbol} on user ${userId}`);
                             }
                         }
                     }
                 } catch (e) { console.error(`Failed to check splits for ${stock.symbol}`, e); }
             }
         }
-        // Update the timestamp regardless of whether a split was found, to prevent spamming the API
         await collection.updateOne({ _id: user._id }, { $set: { lastSplitCheck: now, stocks: user.stocks } });
     }
-    // --- END STOCK SPLIT CHECK ---
 
     if (user.activeCompetition && !user.competitionEnded && new Date().getTime() > user.activeCompetition.endTime) {
         await collection.updateOne({ _id: user._id }, { $set: { isTradingPaused: true, competitionEnded: true } });
@@ -229,13 +243,11 @@ async function getLeaderboards(usersCollection, currentUser) {
     const allSymbols = [...new Set(allUsers.flatMap(u => u.stocks ? u.stocks.map(s => s.symbol) : []))];
     let quotes = {};
     if (allSymbols.length > 0) quotes = await getQuotes(allSymbols);
-
     const rankedUsers = allUsers.map(user => {
         let stockValue = 0;
         if (user.stocks) user.stocks.forEach(stock => { stockValue += stock.shares * (quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice); });
         return { ...user, totalValue: user.cash + stockValue };
     }).sort((a, b) => b.totalValue - a.totalValue);
-
     const global = rankedUsers;
     let classLeaderboard = [];
     if (currentUser.role === 'teacher') {
@@ -258,10 +270,8 @@ async function checkAndAwardAchievements(db, userId) {
     if (!user) return { newAchievements: [] };
     let { achievements, stocks, cash } = user;
     achievements = achievements || [];
-
     const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
     if (!achievements.includes('PATIENT_INVESTOR') && stocks.some(s => s.purchaseDate < thirtyDaysAgo)) achievements.push('PATIENT_INVESTOR');
-
     let totalValue = cash;
     const allSymbols = stocks.map(s => s.symbol);
     if (allSymbols.length > 0) {
@@ -269,13 +279,11 @@ async function checkAndAwardAchievements(db, userId) {
         stocks.forEach(stock => { totalValue += stock.shares * (quotes[stock.symbol] ? quotes[stock.symbol].c : stock.purchasePrice); });
     }
     if (!achievements.includes('MARKET_MASTER') && totalValue >= 125000) achievements.push('MARKET_MASTER');
-    
     if (!achievements.includes('DIVERSIFIED_INVESTOR') && stocks.length >= 3) {
         const industryData = await getStockIndustries(allSymbols);
         const industries = new Set(Object.values(industryData));
         if (industries.size >= 3) achievements.push('DIVERSIFIED_INVESTOR');
     }
-    
     await db.collection('users').updateOne({ _id: user._id }, { $set: { achievements } });
     return { newAchievements: achievements };
 }
@@ -292,45 +300,21 @@ async function fmpApiCall(endpoint, params = {}) {
     if (data["Error Message"]) throw new Error(data["Error Message"]);
     return data;
 }
-
-async function getQuotes(symbols) {
-    const data = await fmpApiCall(`quote/${symbols.join(',')}`);
-    const quotes = {};
-    data.forEach(q => { quotes[q.symbol] = { c: q.price }; });
-    return quotes;
-}
-
+async function getQuotes(symbols) { const data = await fmpApiCall(`quote/${symbols.join(',')}`); const quotes = {}; data.forEach(q => { quotes[q.symbol] = { c: q.price }; }); return quotes; }
 async function getCompanyNews(cacheCollection, symbols) {
     const data = await fmpApiCall(`stock_news`, { tickers: symbols.join(','), limit: 10 });
     let allNews = data || [];
     const headlines = allNews.map(n => n.title);
     const cachedItems = await cacheCollection.find({ headline: { $in: headlines } }).toArray();
     const cacheMap = new Map(cachedItems.map(item => [item.headline, item.simplifiedText]));
-    allNews.forEach(newsItem => {
-        if (cacheMap.has(newsItem.title)) newsItem.simplifiedText = cacheMap.get(newsItem.title);
-        newsItem.headline = newsItem.title;
-        newsItem.summary = newsItem.text;
-        newsItem.datetime = new Date(newsItem.publishedDate).getTime() / 1000;
-        newsItem.id = newsItem.url;
-    });
+    allNews.forEach(newsItem => { if (cacheMap.has(newsItem.title)) newsItem.simplifiedText = cacheMap.get(newsItem.title); newsItem.headline = newsItem.title; newsItem.summary = newsItem.text; newsItem.datetime = new Date(newsItem.publishedDate).getTime() / 1000; newsItem.id = newsItem.url; });
     return allNews;
 }
-
-async function getChartData(symbol) {
-    const data = await fmpApiCall(`historical-price-full/${symbol}`, { serietype: 'line' });
-    if (!data.historical) throw new Error("No chart data available.");
-    const historical = data.historical.reverse();
-    return { c: historical.map(d => d.close), t: historical.map(d => new Date(d.date).getTime() / 1000), s: 'ok' };
-}
-
+async function getChartData(symbol) { const data = await fmpApiCall(`historical-price-full/${symbol}`, { serietype: 'line' }); if (!data.historical) throw new Error("No chart data available."); const historical = data.historical.reverse(); return { c: historical.map(d => d.close), t: historical.map(d => new Date(d.date).getTime() / 1000), s: 'ok' }; }
 async function getStockIndustries(symbols) {
     const profiles = await Promise.all(symbols.map(s => fmpApiCall(`profile/${s}`)));
     const industries = {};
-    profiles.flat().forEach(p => {
-        if (p && p.symbol) {
-            industries[p.symbol] = p.industry || 'Other';
-        }
-    });
+    profiles.flat().forEach(p => { if (p && p.symbol) { industries[p.symbol] = p.industry || 'Other'; } });
     return industries;
 }
 
